@@ -33,6 +33,11 @@ class ControlGUI:
         self.stats_labels = {}
         self.log_text = None
         
+        # Estado de la palanca (0=neutral, 1=avanzar, -1=retroceder)
+        self.joystick_position = 0
+        self.joystick_canvas = None
+        self.joystick_handle = None
+        
         # Manejar el cierre de la ventana
         self.root.protocol("WM_DELETE_WINDOW", self._on_closing)
         
@@ -99,13 +104,13 @@ class ControlGUI:
         # Separador
         tk.Frame(parent, height=1, bg="#34495e").pack(fill='x', pady=8)
         
-        # D-Pad de dirección
+        # Controles de dirección
         tk.Label(
             parent, text="Dirección", font=("Arial", 11, "bold"),
             bg=config.BACKGROUND_COLOR, fg="white"
         ).pack(pady=(0, 5))
         
-        self._create_dpad(parent)
+        self._create_direction_controls(parent)
         
         # Separador
         tk.Frame(parent, height=1, bg="#34495e").pack(fill='x', pady=8)
@@ -121,68 +126,164 @@ class ControlGUI:
         # Instrucciones
         tk.Label(
             parent,
-            text="Flechas=Dirección | 1=Baja | 2=Alta | +/-=Ajustar",
+            text="Palanca=Avanzar/Retroceder | Q/E=Izq/Der | Espacio=Freno",
             font=("Arial", 7),
             bg=config.BACKGROUND_COLOR,
             fg="#95a5a6"
         ).pack(side='bottom', pady=(5, 0))
         
-    def _create_dpad(self, parent):
-        """Crea el D-Pad de dirección"""
-        dpad_frame = tk.Frame(parent, bg=config.BACKGROUND_COLOR)
-        dpad_frame.pack(pady=5)
+    def _create_direction_controls(self, parent):
+        """Crea la palanca y botones de dirección"""
+        control_frame = tk.Frame(parent, bg=config.BACKGROUND_COLOR)
+        control_frame.pack(pady=10)
         
-        # Arriba
-        btn_up = tk.Button(
-            dpad_frame, text="▲", font=("Arial", 14, "bold"),
-            bg=config.BUTTON_COLOR, fg=config.BUTTON_TEXT_COLOR,
-            activebackground=config.BUTTON_ACTIVE_COLOR,
-            width=4, height=2
+        # Frame izquierdo: Palanca vertical
+        joystick_frame = tk.Frame(control_frame, bg=config.BACKGROUND_COLOR)
+        joystick_frame.pack(side='left', padx=15)
+        
+        tk.Label(
+            joystick_frame, text="Avanzar/Retroceder", font=("Arial", 8),
+            bg=config.BACKGROUND_COLOR, fg="#95a5a6"
+        ).pack(pady=(0, 5))
+        
+        # Canvas para la palanca
+        self.joystick_canvas = tk.Canvas(
+            joystick_frame, width=80, height=200,
+            bg="#34495e", highlightthickness=2,
+            highlightbackground="#2c3e50"
         )
-        btn_up.grid(row=0, column=1, padx=2, pady=2)
-        btn_up.bind('<ButtonPress-1>', lambda e: self.on_direction(config.CMD_FORWARD))
-        btn_up.bind('<ButtonRelease-1>', lambda e: self.on_direction(config.CMD_STOP))
+        self.joystick_canvas.pack()
         
-        # Izquierda
-        btn_left = tk.Button(
-            dpad_frame, text="◄", font=("Arial", 14, "bold"),
-            bg=config.BUTTON_COLOR, fg=config.BUTTON_TEXT_COLOR,
-            activebackground=config.BUTTON_ACTIVE_COLOR,
-            width=4, height=2
+        # Dibujar ranura de la palanca
+        self.joystick_canvas.create_line(
+            40, 20, 40, 180,
+            fill="#7f8c8d", width=8
         )
-        btn_left.grid(row=1, column=0, padx=2, pady=2)
-        btn_left.bind('<ButtonPress-1>', lambda e: self.on_direction(config.CMD_LEFT))
-        btn_left.bind('<ButtonRelease-1>', lambda e: self.on_direction(config.CMD_STOP))
         
-        # Centro (Stop)
+        # Marcadores de posición
+        # Avanzar (arriba)
+        self.joystick_canvas.create_text(
+            15, 35, text="▲", font=("Arial", 12),
+            fill="#27ae60", anchor='e'
+        )
+        # Neutral (centro)
+        self.joystick_canvas.create_text(
+            15, 100, text="●", font=("Arial", 12),
+            fill="#95a5a6", anchor='e'
+        )
+        # Retroceder (abajo)
+        self.joystick_canvas.create_text(
+            15, 165, text="▼", font=("Arial", 12),
+            fill="#e74c3c", anchor='e'
+        )
+        
+        # Manija de la palanca (se puede arrastrar)
+        self.joystick_handle = self.joystick_canvas.create_oval(
+            20, 85, 60, 115,
+            fill="#3498db", outline="#2980b9", width=3
+        )
+        
+        # Bind para arrastrar la palanca
+        self.joystick_canvas.tag_bind(self.joystick_handle, '<Button-1>', self._on_joystick_click)
+        self.joystick_canvas.tag_bind(self.joystick_handle, '<B1-Motion>', self._on_joystick_drag)
+        self.joystick_canvas.tag_bind(self.joystick_handle, '<ButtonRelease-1>', self._on_joystick_release)
+        
+        # Frame derecho: Botones de giro y freno
+        buttons_frame = tk.Frame(control_frame, bg=config.BACKGROUND_COLOR)
+        buttons_frame.pack(side='left', padx=15)
+        
+        tk.Label(
+            buttons_frame, text="Giro", font=("Arial", 8),
+            bg=config.BACKGROUND_COLOR, fg="#95a5a6"
+        ).pack(pady=(0, 5))
+        
+        # Botones de giro
+        turn_frame = tk.Frame(buttons_frame, bg=config.BACKGROUND_COLOR)
+        turn_frame.pack(pady=5)
+        
         tk.Button(
-            dpad_frame, text="■", font=("Arial", 14, "bold"),
-            bg="#e74c3c", fg=config.BUTTON_TEXT_COLOR,
-            activebackground="#c0392b", width=4, height=2,
-            command=lambda: self.on_direction(config.CMD_STOP)
-        ).grid(row=1, column=1, padx=2, pady=2)
+            turn_frame, text="◄\nIZQ", font=("Arial", 10, "bold"),
+            bg="#f39c12", fg="white", width=6, height=3,
+            command=lambda: self.on_direction(config.CMD_LEFT)
+        ).pack(side='left', padx=3)
         
-        # Derecha
-        btn_right = tk.Button(
-            dpad_frame, text="►", font=("Arial", 14, "bold"),
-            bg=config.BUTTON_COLOR, fg=config.BUTTON_TEXT_COLOR,
-            activebackground=config.BUTTON_ACTIVE_COLOR,
-            width=4, height=2
-        )
-        btn_right.grid(row=1, column=2, padx=2, pady=2)
-        btn_right.bind('<ButtonPress-1>', lambda e: self.on_direction(config.CMD_RIGHT))
-        btn_right.bind('<ButtonRelease-1>', lambda e: self.on_direction(config.CMD_STOP))
+        tk.Button(
+            turn_frame, text="►\nDER", font=("Arial", 10, "bold"),
+            bg="#f39c12", fg="white", width=6, height=3,
+            command=lambda: self.on_direction(config.CMD_RIGHT)
+        ).pack(side='left', padx=3)
         
-        # Abajo
-        btn_down = tk.Button(
-            dpad_frame, text="▼", font=("Arial", 14, "bold"),
-            bg=config.BUTTON_COLOR, fg=config.BUTTON_TEXT_COLOR,
-            activebackground=config.BUTTON_ACTIVE_COLOR,
-            width=4, height=2
-        )
-        btn_down.grid(row=2, column=1, padx=2, pady=2)
-        btn_down.bind('<ButtonPress-1>', lambda e: self.on_direction(config.CMD_BACKWARD))
-        btn_down.bind('<ButtonRelease-1>', lambda e: self.on_direction(config.CMD_STOP))
+        # Botón de freno
+        tk.Label(
+            buttons_frame, text="Freno", font=("Arial", 8),
+            bg=config.BACKGROUND_COLOR, fg="#95a5a6"
+        ).pack(pady=(10, 5))
+        
+        tk.Button(
+            buttons_frame, text="■\nFRENO", font=("Arial", 11, "bold"),
+            bg="#e74c3c", fg="white", width=14, height=2,
+            command=lambda: self._handle_brake()
+        ).pack()
+    
+    def _on_joystick_click(self, event):
+        """Maneja el click en la palanca"""
+        pass
+    
+    def _on_joystick_drag(self, event):
+        """Maneja el arrastre de la palanca"""
+        # Obtener coordenadas del mouse
+        y = event.y
+        
+        # Limitar el movimiento vertical
+        y = max(35, min(165, y))
+        
+        # Mover la manija
+        self.joystick_canvas.coords(self.joystick_handle, 20, y-15, 60, y+15)
+        
+    def _on_joystick_release(self, event):
+        """Maneja cuando se suelta la palanca - se queda en posición"""
+        # Obtener la posición Y actual
+        coords = self.joystick_canvas.coords(self.joystick_handle)
+        y_center = (coords[1] + coords[3]) / 2
+        
+        # Determinar la posición final (snap a las 3 posiciones)
+        if y_center < 60:  # Zona superior - AVANZAR
+            final_y = 35
+            new_position = 1
+            self.on_direction(config.CMD_FORWARD)
+        elif y_center > 140:  # Zona inferior - RETROCEDER
+            final_y = 165
+            new_position = -1
+            self.on_direction(config.CMD_BACKWARD)
+        else:  # Zona central - NEUTRAL
+            final_y = 100
+            new_position = 0
+            self.on_direction(config.CMD_STOP)
+        
+        # Actualizar posición de la palanca
+        self.joystick_canvas.coords(self.joystick_handle, 20, final_y-15, 60, final_y+15)
+        
+        # Cambiar color según posición
+        if new_position == 1:
+            self.joystick_canvas.itemconfig(self.joystick_handle, fill="#27ae60", outline="#229954")
+        elif new_position == -1:
+            self.joystick_canvas.itemconfig(self.joystick_handle, fill="#e74c3c", outline="#c0392b")
+        else:
+            self.joystick_canvas.itemconfig(self.joystick_handle, fill="#95a5a6", outline="#7f8c8d")
+        
+        self.joystick_position = new_position
+    
+    def _handle_brake(self):
+        """Maneja el freno - detiene y resetea la palanca"""
+        self.on_direction(config.CMD_STOP)
+        # Resetear palanca a posición neutral
+        self.joystick_canvas.coords(self.joystick_handle, 20, 85, 60, 115)
+        self.joystick_canvas.itemconfig(self.joystick_handle, fill="#95a5a6", outline="#7f8c8d")
+        self.joystick_position = 0
+        
+    def _create_dpad(self, parent):
+        """DEPRECATED - Reemplazado por _create_direction_controls"""
+        pass
         
     def _create_speed_controls(self, parent):
         """Crea los controles de velocidad"""
@@ -318,23 +419,45 @@ class ControlGUI:
         
     def _setup_key_bindings(self):
         """Configura los atajos de teclado"""
-        # Direcciones
-        self.root.bind('<Up>', lambda e: self.on_direction(config.CMD_FORWARD))
-        self.root.bind('<Down>', lambda e: self.on_direction(config.CMD_BACKWARD))
-        self.root.bind('<Left>', lambda e: self.on_direction(config.CMD_LEFT))
-        self.root.bind('<Right>', lambda e: self.on_direction(config.CMD_RIGHT))
-        self.root.bind('<KeyRelease-Up>', lambda e: self.on_direction(config.CMD_STOP))
-        self.root.bind('<KeyRelease-Down>', lambda e: self.on_direction(config.CMD_STOP))
-        self.root.bind('<KeyRelease-Left>', lambda e: self.on_direction(config.CMD_STOP))
-        self.root.bind('<KeyRelease-Right>', lambda e: self.on_direction(config.CMD_STOP))
-        self.root.bind('<space>', lambda e: self.on_direction(config.CMD_STOP))
+        # Palanca con W/S
+        self.root.bind('<w>', lambda e: self._set_joystick_position(1))
+        self.root.bind('<W>', lambda e: self._set_joystick_position(1))
+        self.root.bind('<s>', lambda e: self._set_joystick_position(-1))
+        self.root.bind('<S>', lambda e: self._set_joystick_position(-1))
         
-        # Velocidades
+        # Giros con Q/E
+        self.root.bind('<q>', lambda e: self.on_direction(config.CMD_LEFT))
+        self.root.bind('<Q>', lambda e: self.on_direction(config.CMD_LEFT))
+        self.root.bind('<e>', lambda e: self.on_direction(config.CMD_RIGHT))
+        self.root.bind('<E>', lambda e: self.on_direction(config.CMD_RIGHT))
+        
+        # Freno con espacio
+        self.root.bind('<space>', lambda e: self._handle_brake())
+        
+        # Velocidad
         self.root.bind('1', lambda e: self._handle_speed_change(config.CMD_SPEED_LOW))
         self.root.bind('2', lambda e: self._handle_speed_change(config.CMD_SPEED_HIGH))
         self.root.bind('+', lambda e: self._handle_speed_change(config.CMD_SPEED_UP))
         self.root.bind('=', lambda e: self._handle_speed_change(config.CMD_SPEED_UP))
         self.root.bind('-', lambda e: self._handle_speed_change(config.CMD_SPEED_DOWN))
+    
+    def _set_joystick_position(self, position):
+        """Establece la posición de la palanca mediante teclado"""
+        if position == 1:  # Avanzar
+            final_y = 35
+            self.on_direction(config.CMD_FORWARD)
+            self.joystick_canvas.itemconfig(self.joystick_handle, fill="#27ae60", outline="#229954")
+        elif position == -1:  # Retroceder
+            final_y = 165
+            self.on_direction(config.CMD_BACKWARD)
+            self.joystick_canvas.itemconfig(self.joystick_handle, fill="#e74c3c", outline="#c0392b")
+        else:  # Neutral
+            final_y = 100
+            self.on_direction(config.CMD_STOP)
+            self.joystick_canvas.itemconfig(self.joystick_handle, fill="#95a5a6", outline="#7f8c8d")
+        
+        self.joystick_canvas.coords(self.joystick_handle, 20, final_y-15, 60, final_y+15)
+        self.joystick_position = position
         
     def _handle_connect(self):
         """Maneja el evento de conectar"""
