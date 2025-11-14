@@ -4,14 +4,15 @@ Módulo de comunicación WiFi con el ESP32
 
 import socket
 import time
-from typing import Optional
+import threading
+from typing import Optional, Callable
 import config
 
 
 class ESP32Communication:
     """Clase para manejar la comunicación con el ESP32"""
     
-    def __init__(self, monitor=None):
+    def __init__(self, monitor=None, collision_callback: Optional[Callable] = None):
         self.ip = config.ESP32_IP
         self.port = config.ESP32_PORT
         self.socket: Optional[socket.socket] = None
@@ -19,6 +20,9 @@ class ESP32Communication:
         self.last_command = ""
         self.retry_delay = 0.1
         self.monitor = monitor  # Monitor de estadísticas
+        self.collision_callback = collision_callback  # Callback para colisiones
+        self.listen_thread = None
+        self.should_listen = False
         
     def connect(self) -> bool:
         """
@@ -40,6 +44,11 @@ class ESP32Communication:
             if self.monitor:
                 self.monitor.start_connection()
             
+            # Iniciar hilo de escucha para mensajes entrantes
+            self.should_listen = True
+            self.listen_thread = threading.Thread(target=self._listen_for_messages, daemon=True)
+            self.listen_thread.start()
+            
             return True
         except Exception as e:
             print(f"✗ Error de conexión: {e}")
@@ -49,6 +58,7 @@ class ESP32Communication:
     def disconnect(self):
         """Cierra la conexión con el ESP32"""
         try:
+            self.should_listen = False  # Detener hilo de escucha
             if self.socket:
                 self.socket.close()
                 self.socket = None
@@ -86,18 +96,6 @@ class ESP32Communication:
             self.last_command = command
             print(f"→ Comando enviado: {command}")
             
-            # Intentar recibir confirmación
-            try:
-                self.socket.settimeout(0.5)
-                response = self.socket.recv(1024).decode().strip()
-                if response:
-                    print(f"← Respuesta: {response}")
-                    # Registrar respuesta en el monitor
-                    if self.monitor:
-                        self.monitor.response_received(response)
-            except socket.timeout:
-                pass  # No hay problema si no hay respuesta
-            
             return True
         except Exception as e:
             print(f"✗ Error al enviar comando: {e}")
@@ -117,3 +115,44 @@ class ESP32Communication:
     def set_monitor(self, monitor):
         """Asigna un monitor de estadísticas"""
         self.monitor = monitor
+    
+    def set_collision_callback(self, callback: Callable):
+        """Asigna un callback para alertas de colisión"""
+        self.collision_callback = callback
+    
+    def _listen_for_messages(self):
+        """Hilo que escucha mensajes entrantes del ESP32"""
+        print("🎧 Hilo de escucha iniciado")
+        
+        while self.should_listen and self.connected:
+            try:
+                if self.socket:
+                    self.socket.settimeout(1.0)  # Timeout de 1 segundo
+                    try:
+                        data = self.socket.recv(1024)
+                        if data:
+                            message = data.decode().strip()
+                            if message:
+                                print(f"← Mensaje recibido: {message}")
+                                
+                                # Registrar en el monitor
+                                if self.monitor:
+                                    self.monitor.response_received(message)
+                                
+                                # Detectar alerta de colisión
+                                if "COLISION" in message.upper() or "COLLISION" in message.upper():
+                                    print("⚠️ ¡Alerta de colisión detectada!")
+                                    if self.collision_callback:
+                                        self.collision_callback()
+                    except socket.timeout:
+                        continue  # Timeout normal, seguir escuchando
+                    except Exception as e:
+                        if self.should_listen:
+                            print(f"Error en escucha: {e}")
+                        break
+            except Exception as e:
+                if self.should_listen:
+                    print(f"Error general en hilo de escucha: {e}")
+                break
+        
+        print("🎧 Hilo de escucha detenido")

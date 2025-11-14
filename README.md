@@ -11,14 +11,19 @@ ArquiPG2Carrito/
 │   ├── controller.py       # Controlador principal
 │   ├── gui.py              # Interfaz gráfica
 │   ├── communication.py    # Comunicación WiFi
+│   ├── monitoring.py       # Sistema de monitoreo
+│   ├── notifications.py    # Notificaciones SMS (Twilio)
 │   ├── config.py           # Configuración
 │   ├── requirements.txt    # Dependencias
+│   ├── test_twilio.py      # Prueba de SMS
+│   ├── CONFIGURAR_TWILIO.md # Guía de Twilio
 │   └── README.md           # Documentación Python
 │
 ├── Esp32/                   # Código para ESP32
-│   ├── carrito_control.ino # Programa principal ESP32
+│   ├── Esp32.ino           # Programa principal ESP32
 │   └── README.md           # Documentación ESP32
 │
+├── SISTEMA_COLISION.md     # Documentación de colisiones
 └── README.md               # Este archivo
 ```
 
@@ -30,6 +35,9 @@ ArquiPG2Carrito/
 - ✅ Control de velocidad (2 niveles)
 - ✅ Atajos de teclado
 - ✅ Comunicación WiFi TCP/IP
+- ✅ **Panel de monitoreo en tiempo real**
+- ✅ **Sistema de detección de colisión**
+- ✅ **Notificaciones SMS automáticas (Twilio)**
 - ✅ Arquitectura modular
 
 ### ESP32
@@ -38,6 +46,8 @@ ArquiPG2Carrito/
 - ✅ Control PWM de motores
 - ✅ Soporte para puente H (L298N)
 - ✅ 2 niveles de velocidad
+- ✅ **Sensor de colisión (GPIO 34)**
+- ✅ **Parada automática ante colisiones**
 - ✅ Indicadores LED
 
 ## 🛠️ Hardware Necesario
@@ -48,6 +58,9 @@ ArquiPG2Carrito/
 | L298N | 1 | Puente H para motores |
 | Motores DC | 2 | 6-12V |
 | Batería | 1 | 6-12V para motores |
+| **Sensor de Colisión** | 1 | Táctil, bumper o HC-SR04 (opcional) |
+| Cables jumper | - | Para conexiones |
+| Chasis | 1 | Base del carrito |
 | Powerbank | 1 | 5V para ESP32 (opcional) |
 | Cables | varios | Jumpers macho-macho |
 | Chasis | 1 | Para el carrito |
@@ -136,6 +149,28 @@ En `Aplicacion/config.py`:
 SPEED_LOW = 150   # PWM 0-255
 SPEED_HIGH = 255
 ```
+
+### 🚨 Configurar Notificaciones SMS (Opcional)
+
+Para recibir alertas de colisión por SMS:
+
+1. **Crear cuenta en Twilio** (gratis, $15 USD crédito)
+   - https://www.twilio.com/try-twilio
+
+2. **Configurar credenciales** en `config.py`:
+```python
+TWILIO_ACCOUNT_SID = "tu_account_sid"
+TWILIO_AUTH_TOKEN = "tu_auth_token"
+TWILIO_PHONE_FROM = "+1234567890"  # Tu número Twilio
+TWILIO_PHONE_TO = "+50662494299"    # Número destino
+```
+
+3. **Probar configuración**:
+```bash
+python test_twilio.py
+```
+
+📚 **Guía completa**: Ver `Aplicacion/CONFIGURAR_TWILIO.md` y `SISTEMA_COLISION.md`
 
 ## 📡 Arquitectura del Sistema
 

@@ -33,6 +33,9 @@ const int MOTOR_DER_PWM = 32;        // ENB del L298N (PWM)
 // Pin del LED integrado (opcional, para indicación visual)
 const int LED_PIN = 2;
 
+// Pin del sensor de colisión (ejemplo: sensor táctil, ultrasonido, etc.)
+// const int SENSOR_COLISION = 34;      // Pin de entrada para sensor de colisión (COMENTADO PARA PRUEBAS)
+
 // ============= CONFIGURACIÓN PWM =============
 const int PWM_FREQ = 5000;           // Frecuencia PWM (Hz)
 const int PWM_RESOLUTION = 8;        // Resolución 8 bits (0-255)
@@ -45,6 +48,11 @@ const int PWM_CHANNEL_DER = 1;
 int velocidadActual = 150;           // Velocidad inicial (0-255)
 bool motorActivo = false;
 String comandoActual = "STOP";
+bool colisionDetectada = false;      // Flag de colisión
+unsigned long ultimaColision = 0;    // Timestamp de última colisión
+
+// Variables para prueba manual por Serial
+String serialBuffer = "";            // Buffer para comandos del Serial Monitor
 
 // ============= PROTOTIPOS DE FUNCIONES =============
 void setupWiFi();
@@ -57,6 +65,8 @@ void motorDerecha();
 void motorDetener();
 void setVelocidad(int velocidad);
 void parpadearLED(int veces);
+void verificarColision();
+void enviarAlertaColision(WiFiClient &client);
 
 // ============= SETUP =============
 void setup() {
@@ -69,6 +79,9 @@ void setup() {
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, LOW);
   
+  // Configurar sensor de colisión como entrada con pull-up
+  // pinMode(SENSOR_COLISION, INPUT_PULLUP);  // COMENTADO PARA PRUEBAS
+  
   // Inicializar motores
   setupMotors();
   
@@ -77,11 +90,33 @@ void setup() {
   
   Serial.println("\n✓ Sistema listo!");
   Serial.println("Esperando conexiones...");
+  Serial.println("\n💡 MODO PRUEBA: Escribe 'R' en el Serial Monitor para simular colisión");
   parpadearLED(3);
 }
 
 // ============= LOOP PRINCIPAL =============
 void loop() {
+  // Leer comandos del Serial Monitor para pruebas (funciona SIN cliente)
+  if (Serial.available() > 0) {
+    char c = Serial.read();
+    
+    // Debug: mostrar cada carácter recibido
+    Serial.print("DEBUG: Caracter recibido: '");
+    Serial.print(c);
+    Serial.print("' (ASCII: ");
+    Serial.print((int)c);
+    Serial.println(")");
+    
+    // Detectar 'R' o 'r' directamente
+    if (c == 'R' || c == 'r') {
+      Serial.println("\n🧪 [PRUEBA MANUAL] ¡Comando R detectado!");
+      Serial.println("🧪 [PRUEBA MANUAL] Simulando colisión...");
+      colisionDetectada = true;
+      parpadearLED(3); // Indicador visual
+      motorDetener();
+    }
+  }
+  
   WiFiClient client = server.available();
   
   if (client) {
@@ -91,6 +126,33 @@ void loop() {
     String comandoBuffer = "";
     
     while (client.connected()) {
+      // Leer comandos del Serial Monitor mientras está conectado
+      if (Serial.available() > 0) {
+        char c = Serial.read();
+        
+        // Debug: mostrar cada carácter recibido
+        Serial.print("DEBUG: Caracter recibido: '");
+        Serial.print(c);
+        Serial.print("' (ASCII: ");
+        Serial.print((int)c);
+        Serial.println(")");
+        
+        // Detectar 'R' o 'r' directamente
+        if (c == 'R' || c == 'r') {
+          Serial.println("\n🧪 [PRUEBA MANUAL] ¡Comando R detectado!");
+          Serial.println("🧪 [PRUEBA MANUAL] Simulando colisión...");
+          colisionDetectada = true;
+          parpadearLED(3); // Indicador visual
+          motorDetener();
+        }
+      }
+      
+      // Si hay colisión detectada, enviar alerta
+      if (colisionDetectada) {
+        enviarAlertaColision(client);
+        colisionDetectada = false; // Reset flag
+      }
+      
       if (client.available()) {
         char c = client.read();
         
@@ -382,3 +444,34 @@ void parpadearLED(int veces) {
     delay(100);
   }
 }
+
+// ============= DETECCIÓN DE COLISIÓN =============
+void verificarColision() {
+  // FUNCIÓN DESACTIVADA - Usar comando 'R' en Serial Monitor para pruebas
+  // Para activar sensor físico, descomentar el código siguiente:
+  
+  /*
+  // Leer sensor de colisión (LOW = colisión detectada con pull-up)
+  int sensorValue = digitalRead(SENSOR_COLISION);
+  
+  if (sensorValue == LOW) {
+    unsigned long tiempoActual = millis();
+    if (tiempoActual - ultimaColision > 1000) { // 1 segundo de cooldown
+      Serial.println("\n⚠️ ¡COLISIÓN DETECTADA!");
+      motorDetener();
+      parpadearLED(5);
+      colisionDetectada = true;
+      ultimaColision = tiempoActual;
+    }
+  }
+  */
+}
+
+void enviarAlertaColision(WiFiClient &client) {
+  // Enviar mensaje de alerta al cliente
+  if (client.connected()) {
+    client.println("COLISION_DETECTADA");
+    Serial.println("→ Alerta de colisión enviada al cliente");
+  }
+}
+

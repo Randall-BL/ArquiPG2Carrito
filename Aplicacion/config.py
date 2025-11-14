@@ -42,3 +42,14 @@ STATS_UPDATE_INTERVAL = 500  # ms - Intervalo de actualización de estadísticas
 LOG_MAX_LINES = 10  # Número máximo de líneas en el log
 LATENCY_WARNING_MS = 100  # ms - Umbral de advertencia de latencia
 PACKET_LOSS_WARNING = 5  # % - Umbral de advertencia de pérdida de paquetes
+
+# Configuración de Twilio (SMS)
+# Cargar desde variables de entorno por seguridad
+import os
+TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "")
+TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "")
+TWILIO_PHONE_FROM = os.getenv("TWILIO_PHONE_FROM", "")
+TWILIO_PHONE_TO = os.getenv("TWILIO_PHONE_TO", "")
+
+# Configuración de alertas
+COLLISION_COOLDOWN = 10  # Segundos entre notificaciones de colisión

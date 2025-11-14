@@ -6,6 +6,7 @@ import config
 from communication import ESP32Communication
 from gui import ControlGUI
 from monitoring import CommunicationMonitor
+from notifications import TwilioNotifier
 
 
 class CarController:
@@ -13,7 +14,8 @@ class CarController:
     
     def __init__(self):
         self.monitor = CommunicationMonitor()
-        self.comm = ESP32Communication(monitor=self.monitor)
+        self.comm = ESP32Communication(monitor=self.monitor, collision_callback=self._handle_collision_alert)
+        self.notifier = TwilioNotifier()  # Sistema de notificaciones
         self.gui = ControlGUI(
             on_direction_callback=self.handle_direction,
             on_speed_callback=self.handle_speed,
@@ -132,6 +134,26 @@ class CarController:
             # Solo mostrar los últimos mensajes nuevos
             for message in log_messages[-5:]:  # Últimos 5 mensajes
                 pass  # Ya se agregan en tiempo real
+    
+    def _handle_collision_alert(self):
+        """Maneja la alerta de colisión"""
+        print("\n⚠️ ¡COLISIÓN DETECTADA!")
+        
+        # Detener el carrito inmediatamente
+        self.comm.send_command(config.CMD_STOP)
+        
+        # Mostrar alerta en la GUI
+        self.gui.add_log_message("⚠️ ¡COLISIÓN DETECTADA!")
+        
+        # Enviar notificación SMS
+        success = self.notifier.send_collision_alert()
+        
+        if success:
+            print("✓ Notificación SMS enviada")
+            self.gui.add_log_message("✓ SMS enviado a +50662494299")
+        else:
+            print("✗ Error al enviar notificación SMS")
+            self.gui.add_log_message("✗ Error al enviar SMS")
         
     def run(self):
         """Inicia la aplicación"""
