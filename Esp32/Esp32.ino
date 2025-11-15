@@ -6,8 +6,8 @@
 // -------------------------
 // WIFI
 // -------------------------
-const char* ssid = "Familia Rodriguez";
-const char* password = "B+E=NCU^PerPelSinPan.175";
+const char* ssid = "XXXXX";
+const char* password = "XXXXXXX";
 WiFiServer server(9000);
 
 // -------------------------
