@@ -12,7 +12,7 @@ import config
 class ESP32Communication:
     """Clase para manejar la comunicación con el ESP32"""
     
-    def __init__(self, monitor=None, collision_callback: Optional[Callable] = None):
+    def __init__(self, monitor=None, collision_callback: Optional[Callable] = None, speed_callback: Optional[Callable] = None):
         self.ip = config.ESP32_IP
         self.port = config.ESP32_PORT
         self.socket: Optional[socket.socket] = None
@@ -21,6 +21,7 @@ class ESP32Communication:
         self.retry_delay = 0.1
         self.monitor = monitor  # Monitor de estadísticas
         self.collision_callback = collision_callback  # Callback para colisiones
+        self.speed_callback = speed_callback  # Callback para actualizaciones de velocidad
         self.listen_thread = None
         self.should_listen = False
         
@@ -120,6 +121,10 @@ class ESP32Communication:
         """Asigna un callback para alertas de colisión"""
         self.collision_callback = callback
     
+    def set_speed_callback(self, callback: Callable):
+        """Asigna un callback para actualizaciones de velocidad"""
+        self.speed_callback = callback
+    
     def _listen_for_messages(self):
         """Hilo que escucha mensajes entrantes del ESP32"""
         print("🎧 Hilo de escucha iniciado")
@@ -139,8 +144,18 @@ class ESP32Communication:
                                 if self.monitor:
                                     self.monitor.response_received(message)
                                 
+                                # Detectar mensaje de velocidad
+                                if message.startswith("SPEED:"):
+                                    try:
+                                        speed_value = float(message.split(":")[1])
+                                        print(f"📊 Velocidad actual: {speed_value:.2f} cm/s")
+                                        if self.speed_callback:
+                                            self.speed_callback(speed_value)
+                                    except (ValueError, IndexError) as e:
+                                        print(f"Error procesando velocidad: {e}")
+                                
                                 # Detectar alerta de colisión
-                                if "COLISION" in message.upper() or "COLLISION" in message.upper():
+                                elif "COLISION" in message.upper() or "COLLISION" in message.upper():
                                     print("⚠️ ¡Alerta de colisión detectada!")
                                     if self.collision_callback:
                                         self.collision_callback()

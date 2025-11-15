@@ -26,7 +26,8 @@ class ControlGUI:
         
         self.current_speed = "LOW"
         self.connection_status_label = None
-        self.speed_display_label = None
+        self.speed_display_label = None  # Label para velocidad MPU6050
+        self.pwm_display_label = None    # Label para PWM del motor
         self.is_closed = False
         
         # Referencias para monitoreo
@@ -201,17 +202,22 @@ class ControlGUI:
         turn_frame = tk.Frame(buttons_frame, bg=config.BACKGROUND_COLOR)
         turn_frame.pack(pady=5)
         
-        tk.Button(
+        # Crear botones con eventos de presionar y soltar
+        left_btn = tk.Button(
             turn_frame, text="◄\nIZQ", font=("Arial", 10, "bold"),
-            bg="#f39c12", fg="white", width=6, height=3,
-            command=lambda: self.on_direction(config.CMD_LEFT)
-        ).pack(side='left', padx=3)
+            bg="#f39c12", fg="white", width=6, height=3
+        )
+        left_btn.pack(side='left', padx=3)
+        left_btn.bind('<ButtonPress-1>', lambda e: self.on_direction(config.CMD_LEFT))
+        left_btn.bind('<ButtonRelease-1>', lambda e: self.on_direction(config.CMD_STOP))
         
-        tk.Button(
+        right_btn = tk.Button(
             turn_frame, text="►\nDER", font=("Arial", 10, "bold"),
-            bg="#f39c12", fg="white", width=6, height=3,
-            command=lambda: self.on_direction(config.CMD_RIGHT)
-        ).pack(side='left', padx=3)
+            bg="#f39c12", fg="white", width=6, height=3
+        )
+        right_btn.pack(side='left', padx=3)
+        right_btn.bind('<ButtonPress-1>', lambda e: self.on_direction(config.CMD_RIGHT))
+        right_btn.bind('<ButtonRelease-1>', lambda e: self.on_direction(config.CMD_STOP))
         
         # Botón de freno
         tk.Label(
@@ -310,17 +316,37 @@ class ControlGUI:
         display_frame = tk.Frame(speed_frame, bg=config.BACKGROUND_COLOR)
         display_frame.pack(pady=5)
         
+        # Velocidad PWM (la que se manda al ESP32)
+        pwm_frame = tk.Frame(display_frame, bg=config.BACKGROUND_COLOR)
+        pwm_frame.pack(pady=2)
+        
         tk.Label(
-            display_frame, text="Actual:", font=("Arial", 8),
+            pwm_frame, text="⚡ PWM Motor:", font=("Arial", 8),
+            bg=config.BACKGROUND_COLOR, fg="white"
+        ).pack()
+        
+        self.pwm_display_label = tk.Label(
+            pwm_frame, text="150 / 255", font=("Arial", 11, "bold"),
+            bg="#34495e", fg="#f39c12", width=12,
+            relief="sunken", padx=8, pady=2
+        )
+        self.pwm_display_label.pack(pady=2)
+        
+        # Velocidad Real (MPU6050)
+        mpu_frame = tk.Frame(display_frame, bg=config.BACKGROUND_COLOR)
+        mpu_frame.pack(pady=2)
+        
+        tk.Label(
+            mpu_frame, text="📊 Velocidad Real (MPU6050):", font=("Arial", 8),
             bg=config.BACKGROUND_COLOR, fg="white"
         ).pack()
         
         self.speed_display_label = tk.Label(
-            display_frame, text="150 / 255", font=("Arial", 13, "bold"),
-            bg="#34495e", fg="#3498db", width=10,
-            relief="sunken", padx=8, pady=3
+            mpu_frame, text="0.00 cm/s", font=("Arial", 11, "bold"),
+            bg="#34495e", fg="#3498db", width=12,
+            relief="sunken", padx=8, pady=2
         )
-        self.speed_display_label.pack(pady=3)
+        self.speed_display_label.pack(pady=2)
         
         # Botones de ajuste
         adjust_frame = tk.Frame(speed_frame, bg=config.BACKGROUND_COLOR)
@@ -500,25 +526,49 @@ class ControlGUI:
         except tk.TclError:
             self.is_closed = True
             
-    def update_speed_display(self, current_speed: int, max_speed: int = 255):
-        """Actualiza el display de velocidad actual"""
+    def update_speed_display(self, current_speed: float, max_speed: float = 200.0):
+        """Actualiza el display de velocidad real del MPU6050 (en cm/s)"""
         if self.is_closed or self.speed_display_label is None:
             return
             
         try:
-            self.speed_display_label.config(text=f"{current_speed} / {max_speed}")
+            # Mostrar velocidad en cm/s
+            self.speed_display_label.config(text=f"{current_speed:.2f} cm/s")
             
             # Cambiar color según la velocidad
             if current_speed == 0:
-                color = "#e74c3c"
-            elif current_speed < 128:
-                color = "#f39c12"
-            elif current_speed < 200:
-                color = "#3498db"
+                color = "#e74c3c"  # Rojo - Detenido
+            elif current_speed < 50:
+                color = "#f39c12"  # Naranja - Lento
+            elif current_speed < 100:
+                color = "#3498db"  # Azul - Medio
             else:
-                color = "#27ae60"
+                color = "#27ae60"  # Verde - Rápido
             
             self.speed_display_label.config(fg=color)
+        except tk.TclError:
+            self.is_closed = True
+    
+    def update_pwm_display(self, current_pwm: int, max_pwm: int = 255):
+        """Actualiza el display de PWM del motor (0-255)"""
+        if self.is_closed or self.pwm_display_label is None:
+            return
+            
+        try:
+            # Mostrar PWM
+            self.pwm_display_label.config(text=f"{current_pwm} / {max_pwm}")
+            
+            # Cambiar color según el PWM
+            if current_pwm == 0:
+                color = "#e74c3c"  # Rojo - Detenido
+            elif current_pwm < 100:
+                color = "#f39c12"  # Naranja - Bajo
+            elif current_pwm < 180:
+                color = "#3498db"  # Azul - Medio
+            else:
+                color = "#27ae60"  # Verde - Alto
+            
+            self.pwm_display_label.config(fg=color)
         except tk.TclError:
             self.is_closed = True
     

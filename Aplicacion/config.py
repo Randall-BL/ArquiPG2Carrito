@@ -3,13 +3,13 @@ Configuración del sistema de control remoto
 """
 
 # Configuración de red
-ESP32_IP = "192.168.4.1"  # IP del ESP32 (por defecto en modo AP)
-ESP32_PORT = 80
+ESP32_IP = "192.168.50.190"  # IP del ESP32 (por defecto en modo AP)
+ESP32_PORT = 9000  # Puerto del servidor en el ESP32
 
 # Configuración de la interfaz
 WINDOW_TITLE = "Control Remoto - Carrito ESP32"
 WINDOW_WIDTH = 700  # Aumentado para el panel de monitoreo
-WINDOW_HEIGHT = 600
+WINDOW_HEIGHT = 700
 BACKGROUND_COLOR = "#2c3e50"
 
 # Colores de botones

@@ -14,7 +14,11 @@ class CarController:
     
     def __init__(self):
         self.monitor = CommunicationMonitor()
-        self.comm = ESP32Communication(monitor=self.monitor, collision_callback=self._handle_collision_alert)
+        self.comm = ESP32Communication(
+            monitor=self.monitor, 
+            collision_callback=self._handle_collision_alert,
+            speed_callback=self._handle_speed_update
+        )
         self.notifier = TwilioNotifier()  # Sistema de notificaciones
         self.gui = ControlGUI(
             on_direction_callback=self.handle_direction,
@@ -22,9 +26,12 @@ class CarController:
             on_connect_callback=self.handle_connect,
             on_disconnect_callback=self.handle_disconnect
         )
-        self.current_speed = config.SPEED_LOW
-        # Actualizar display inicial
-        self.gui.update_speed_display(self.current_speed)
+        self.current_pwm = config.SPEED_LOW  # PWM que se envía al ESP32 (0-255)
+        self.current_speed_real = 0.0  # Velocidad real medida por MPU6050 (cm/s)
+        
+        # Actualizar displays iniciales
+        self.gui.update_pwm_display(self.current_pwm)
+        self.gui.update_speed_display(self.current_speed_real)
         
         # Iniciar actualización periódica de estadísticas
         self._schedule_stats_update()
@@ -47,37 +54,37 @@ class CarController:
             command: Comando de velocidad (SPEED_LOW, SPEED_HIGH, SPEED_UP, SPEED_DOWN)
         """
         if command == config.CMD_SPEED_LOW:
-            self.current_speed = config.SPEED_LOW
+            self.current_pwm = config.SPEED_LOW
             print(f"🐌 Velocidad BAJA: {config.SPEED_LOW}")
         elif command == config.CMD_SPEED_HIGH:
-            self.current_speed = config.SPEED_HIGH
+            self.current_pwm = config.SPEED_HIGH
             print(f"🚀 Velocidad ALTA: {config.SPEED_HIGH}")
         elif command == config.CMD_SPEED_UP:
             # Incrementar velocidad
-            new_speed = min(self.current_speed + config.SPEED_STEP, config.SPEED_MAX)
-            if new_speed != self.current_speed:
-                self.current_speed = new_speed
-                print(f"⬆ Velocidad incrementada: {self.current_speed}")
+            new_speed = min(self.current_pwm + config.SPEED_STEP, config.SPEED_MAX)
+            if new_speed != self.current_pwm:
+                self.current_pwm = new_speed
+                print(f"⬆ Velocidad incrementada: {self.current_pwm}")
             else:
                 print(f"⚠ Velocidad máxima alcanzada: {config.SPEED_MAX}")
         elif command == config.CMD_SPEED_DOWN:
             # Decrementar velocidad
-            new_speed = max(self.current_speed - config.SPEED_STEP, config.SPEED_MIN)
-            if new_speed != self.current_speed:
-                self.current_speed = new_speed
-                print(f"⬇ Velocidad decrementada: {self.current_speed}")
+            new_speed = max(self.current_pwm - config.SPEED_STEP, config.SPEED_MIN)
+            if new_speed != self.current_pwm:
+                self.current_pwm = new_speed
+                print(f"⬇ Velocidad decrementada: {self.current_pwm}")
             else:
                 print(f"⚠ Velocidad mínima alcanzada: {config.SPEED_MIN}")
         
-        # Actualizar display de velocidad
-        self.gui.update_speed_display(self.current_speed)
+        # Actualizar display de PWM
+        self.gui.update_pwm_display(self.current_pwm)
         
         # Enviar comando al ESP32
         if self.comm.is_connected():
             # Para SPEED_UP y SPEED_DOWN, enviamos el valor específico
             if command in [config.CMD_SPEED_UP, config.CMD_SPEED_DOWN]:
                 # Crear comando con el valor exacto
-                speed_command = f"SPEED_SET:{self.current_speed}"
+                speed_command = f"SPEED_SET:{self.current_pwm}"
                 self.comm.send_command(speed_command)
             else:
                 self.comm.send_command(command)
@@ -97,6 +104,11 @@ class CarController:
             self.gui.show_info("Conexión", f"Conectado exitosamente a {config.ESP32_IP}")
             self.gui.add_log_message("=== Conexión Establecida ===")
             self.gui.add_log_message(f"IP: {config.ESP32_IP}:{config.ESP32_PORT}")
+            
+            # Consultar la velocidad actual del ESP32
+            import time
+            time.sleep(0.5)  # Dar tiempo para establecer la conexión
+            self.comm.send_command("GET_SPEED")
         else:
             self.gui.update_connection_status(False)
             self.gui.show_error(
@@ -154,6 +166,18 @@ class CarController:
         else:
             print("✗ Error al enviar notificación SMS")
             self.gui.add_log_message("✗ Error al enviar SMS")
+    
+    def _handle_speed_update(self, speed: int):
+        """Maneja la actualización de velocidad real desde el ESP32 (MPU6050)"""
+        try:
+            # Convertir a float si viene como entero o string
+            speed_value = float(speed)
+            print(f"📊 Velocidad real MPU6050: {speed_value:.2f} cm/s")
+            self.current_speed_real = speed_value
+            # Actualizar solo el display de velocidad real, no el PWM
+            self.gui.update_speed_display(self.current_speed_real)
+        except (ValueError, TypeError) as e:
+            print(f"Error al procesar velocidad: {e}")
         
     def run(self):
         """Inicia la aplicación"""

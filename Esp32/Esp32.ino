@@ -1,477 +1,340 @@
-/*
- * Control Remoto para Carrito ESP32
- * 
- * Este programa configura el ESP32 como servidor WiFi (Access Point)
- * y controla motores DC mediante un puente H (L298N o similar)
- * basado en comandos recibidos por WiFi desde la aplicación Python.
- * 
- * Autor: Proyecto ArquiPG2Carrito
- * Plataforma: ESP32
- */
-
 #include <WiFi.h>
+#include <Wire.h>
 #include <WiFiClient.h>
-#include <WiFiAP.h>
+#include "MPU6050.h"
 
-// ============= CONFIGURACIÓN WIFI =============
-const char* ssid = "ESP32_Carrito";        // Nombre de la red WiFi
-const char* password = "12345678";         // Contraseña (mínimo 8 caracteres)
+// -------------------------
+// WIFI
+// -------------------------
+const char* ssid = "Familia Rodriguez";
+const char* password = "B+E=NCU^PerPelSinPan.175";
+WiFiServer server(9000);
 
-WiFiServer server(80);                     // Servidor en puerto 80
+// -------------------------
+// MOTORES (L298N)
+// -------------------------
+#define IN1 25
+#define IN2 26
+#define IN3 27
+#define IN4 14
 
-// ============= CONFIGURACIÓN DE PINES =============
-// Pines para Motor Izquierdo
-const int MOTOR_IZQ_ADELANTE = 26;   // IN1 del L298N
-const int MOTOR_IZQ_ATRAS = 27;      // IN2 del L298N
-const int MOTOR_IZQ_PWM = 14;        // ENA del L298N (PWM)
+#define ENA 32   // PWM Motor A
+#define ENB 33   // PWM Motor B
 
-// Pines para Motor Derecho
-const int MOTOR_DER_ADELANTE = 25;   // IN3 del L298N
-const int MOTOR_DER_ATRAS = 33;      // IN4 del L298N
-const int MOTOR_DER_PWM = 32;        // ENB del L298N (PWM)
+int velocidad = 200;   // valor inicial PWM (0–255)
 
-// Pin del LED integrado (opcional, para indicación visual)
-const int LED_PIN = 2;
+// -------------------------
+// HC-SR04
+// -------------------------
+#define TRIG_PIN 4
+#define ECHO_PIN 5
 
-// Pin del sensor de colisión (ejemplo: sensor táctil, ultrasonido, etc.)
-// const int SENSOR_COLISION = 34;      // Pin de entrada para sensor de colisión (COMENTADO PARA PRUEBAS)
+volatile long t_start = 0;
+volatile long t_end = 0;
+volatile bool pulseDone = false;
 
-// ============= CONFIGURACIÓN PWM =============
-const int PWM_FREQ = 5000;           // Frecuencia PWM (Hz)
-const int PWM_RESOLUTION = 8;        // Resolución 8 bits (0-255)
+// -------------------------
+// MPU6050
+// -------------------------
+MPU6050 mpu;
 
-// Canales PWM
-const int PWM_CHANNEL_IZQ = 0;
-const int PWM_CHANNEL_DER = 1;
+// Variables para cálculo de velocidad
+float velocidadActual = 0.0;  // cm/s
+float velocidadAnterior = 0.0;
+unsigned long tiempoAnterior = 0;
+int16_t ax_anterior = 0;
+int16_t ay_anterior = 0;
 
-// ============= VARIABLES GLOBALES =============
-int velocidadActual = 150;           // Velocidad inicial (0-255)
-bool motorActivo = false;
-String comandoActual = "STOP";
-bool colisionDetectada = false;      // Flag de colisión
-unsigned long ultimaColision = 0;    // Timestamp de última colisión
+// Constante de conversión del acelerómetro
+const float ACCEL_SCALE = 16384.0;  // Para ±2g
+const float GRAVITY = 980.0;  // cm/s²
 
-// Variables para prueba manual por Serial
-String serialBuffer = "";            // Buffer para comandos del Serial Monitor
+// =========================
+// FUNCIONES DE MOTORES
+// =========================
+void aplicarVelocidad() {
+  ledcWrite(ENA, velocidad);  // ENA - Motor de tracción (usa velocidad variable)
+  ledcWrite(ENB, 255);        // ENB - Motor de dirección (siempre a máxima potencia)
+}
 
-// ============= PROTOTIPOS DE FUNCIONES =============
-void setupWiFi();
-void setupMotors();
-void procesarComando(String comando);
-void motorAdelante();
-void motorAtras();
-void motorIzquierda();
-void motorDerecha();
-void motorDetener();
-void setVelocidad(int velocidad);
-void parpadearLED(int veces);
-void verificarColision();
-void enviarAlertaColision(WiFiClient &client);
+void detener() {
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, LOW);
+  digitalWrite(IN3, LOW);
+  digitalWrite(IN4, LOW);
+}
 
-// ============= SETUP =============
+void avanzar() {
+  // IN1/IN2: Tracción ADELANTE
+  digitalWrite(IN1, HIGH);
+  digitalWrite(IN2, LOW);
+
+  // IN3/IN4: Dirección NEUTRAL (recto)
+  //digitalWrite(IN3, LOW);
+  //digitalWrite(IN4, LOW);
+
+  aplicarVelocidad();
+}
+
+void retroceder() {
+  // IN1/IN2: Tracción ATRÁS
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, HIGH);
+
+  // IN3/IN4: Dirección NEUTRAL (recto)
+  //digitalWrite(IN3, LOW);
+  //digitalWrite(IN4, LOW);
+
+  aplicarVelocidad();
+}
+
+void girarDerecha() {
+  // IN1/IN2: Sin tracción (o tracción adelante para girar en movimiento)
+  //digitalWrite(IN1, LOW);
+  //digitalWrite(IN2, LOW);
+
+  // IN3/IN4: Dirección DERECHA
+  digitalWrite(IN3, HIGH);
+  digitalWrite(IN4, LOW);
+
+  aplicarVelocidad();
+}
+
+void girarIzquierda() {
+  // IN1/IN2: Sin tracción (o tracción adelante para girar en movimiento)
+  //digitalWrite(IN1, LOW);
+  //digitalWrite(IN2, LOW);
+
+  // IN3/IN4: Dirección IZQUIERDA
+  digitalWrite(IN3, LOW);
+  digitalWrite(IN4, HIGH);
+
+  aplicarVelocidad();
+}
+
+// =========================
+//   INTERRUPCIÓN HC-SR04
+// =========================
+void IRAM_ATTR echo_ISR() {
+  if (digitalRead(ECHO_PIN) == HIGH) {
+    t_start = micros();
+  } else {
+    t_end = micros();
+    pulseDone = true;
+  }
+}
+
+float medirDistancia() {
+  pulseDone = false;
+
+  digitalWrite(TRIG_PIN, LOW);
+  delayMicroseconds(5);
+  digitalWrite(TRIG_PIN, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TRIG_PIN, LOW);
+
+  unsigned long timeout = millis();
+  while (!pulseDone && millis() - timeout < 50) {}
+
+  if (!pulseDone) return -1;
+
+  long dt = t_end - t_start;
+  return dt * 0.0343 / 2.0;
+}
+
+// =========================
+// CÁLCULO DE VELOCIDAD MPU6050
+// =========================
+void calcularVelocidad() {
+  int16_t ax, ay, az;
+  mpu.getAcceleration(&ax, &ay, &az);
+  
+  unsigned long tiempoActual = millis();
+  float deltaT = (tiempoActual - tiempoAnterior) / 1000.0;  // Convertir a segundos
+  
+  if (deltaT > 0 && deltaT < 1.0) {  // Evitar divisiones extrañas
+    // Convertir aceleración a cm/s²
+    float accelX = (ax / ACCEL_SCALE) * GRAVITY;
+    float accelY = (ay / ACCEL_SCALE) * GRAVITY;
+    
+    // Calcular magnitud de aceleración horizontal (plano XY)
+    float accelMagnitud = sqrt(accelX * accelX + accelY * accelY);
+    
+    // Aplicar umbral para eliminar ruido cuando está detenido
+    if (abs(accelMagnitud) < 50.0) {  // Umbral de ruido
+      accelMagnitud = 0;
+    }
+    
+    // Integrar aceleración para obtener velocidad: v = v0 + a*t
+    velocidadActual = velocidadAnterior + (accelMagnitud * deltaT);
+    
+    // Aplicar factor de decaimiento (simulación de fricción)
+    velocidadActual *= 0.95;
+    
+    // Si el carrito está detenido (PWM = 0 o muy bajo), resetear velocidad
+    if (velocidad < 50) {
+      velocidadActual *= 0.7;  // Decaimiento rápido
+    }
+    
+    // Limitar velocidad a valores razonables (0-200 cm/s ≈ 0-7 km/h)
+    if (velocidadActual < 0) velocidadActual = 0;
+    if (velocidadActual > 200) velocidadActual = 200;
+    
+    velocidadAnterior = velocidadActual;
+  }
+  
+  tiempoAnterior = tiempoActual;
+}
+
+float obtenerVelocidadReal() {
+  return velocidadActual;  // En cm/s
+}
+
+
+// =========================
+// SETUP
+// =========================
 void setup() {
   Serial.begin(115200);
-  Serial.println("\n\n=================================");
-  Serial.println("Control Remoto Carrito ESP32");
-  Serial.println("=================================");
-  
-  // Configurar LED
-  pinMode(LED_PIN, OUTPUT);
-  digitalWrite(LED_PIN, LOW);
-  
-  // Configurar sensor de colisión como entrada con pull-up
-  // pinMode(SENSOR_COLISION, INPUT_PULLUP);  // COMENTADO PARA PRUEBAS
-  
-  // Inicializar motores
-  setupMotors();
-  
-  // Inicializar WiFi
-  setupWiFi();
-  
-  Serial.println("\n✓ Sistema listo!");
-  Serial.println("Esperando conexiones...");
-  Serial.println("\n💡 MODO PRUEBA: Escribe 'R' en el Serial Monitor para simular colisión");
-  parpadearLED(3);
-}
 
-// ============= LOOP PRINCIPAL =============
-void loop() {
-  // Leer comandos del Serial Monitor para pruebas (funciona SIN cliente)
-  if (Serial.available() > 0) {
-    char c = Serial.read();
-    
-    // Debug: mostrar cada carácter recibido
-    Serial.print("DEBUG: Caracter recibido: '");
-    Serial.print(c);
-    Serial.print("' (ASCII: ");
-    Serial.print((int)c);
-    Serial.println(")");
-    
-    // Detectar 'R' o 'r' directamente
-    if (c == 'R' || c == 'r') {
-      Serial.println("\n🧪 [PRUEBA MANUAL] ¡Comando R detectado!");
-      Serial.println("🧪 [PRUEBA MANUAL] Simulando colisión...");
-      colisionDetectada = true;
-      parpadearLED(3); // Indicador visual
-      motorDetener();
-    }
-  }
-  
-  WiFiClient client = server.available();
-  
-  if (client) {
-    Serial.println("\n→ Nuevo cliente conectado");
-    digitalWrite(LED_PIN, HIGH);
-    
-    String comandoBuffer = "";
-    
-    while (client.connected()) {
-      // Leer comandos del Serial Monitor mientras está conectado
-      if (Serial.available() > 0) {
-        char c = Serial.read();
-        
-        // Debug: mostrar cada carácter recibido
-        Serial.print("DEBUG: Caracter recibido: '");
-        Serial.print(c);
-        Serial.print("' (ASCII: ");
-        Serial.print((int)c);
-        Serial.println(")");
-        
-        // Detectar 'R' o 'r' directamente
-        if (c == 'R' || c == 'r') {
-          Serial.println("\n🧪 [PRUEBA MANUAL] ¡Comando R detectado!");
-          Serial.println("🧪 [PRUEBA MANUAL] Simulando colisión...");
-          colisionDetectada = true;
-          parpadearLED(3); // Indicador visual
-          motorDetener();
-        }
-      }
-      
-      // Si hay colisión detectada, enviar alerta
-      if (colisionDetectada) {
-        enviarAlertaColision(client);
-        colisionDetectada = false; // Reset flag
-      }
-      
-      if (client.available()) {
-        char c = client.read();
-        
-        if (c == '\n') {
-          // Procesar comando completo
-          comandoBuffer.trim();
-          
-          if (comandoBuffer.length() > 0) {
-            Serial.print("Comando recibido: ");
-            Serial.println(comandoBuffer);
-            
-            procesarComando(comandoBuffer);
-            
-            // Enviar confirmación al cliente
-            client.println("OK");
-            
-            comandoBuffer = "";
-          }
-        } else if (c != '\r') {
-          comandoBuffer += c;
-        }
-      }
-      
-      delay(1);
-    }
-    
-    // Cliente desconectado
-    Serial.println("← Cliente desconectado");
-    digitalWrite(LED_PIN, LOW);
-    motorDetener();
-  }
-}
+  // Pines motores
+  pinMode(IN1, OUTPUT);
+  pinMode(IN2, OUTPUT);
+  pinMode(IN3, OUTPUT);
+  pinMode(IN4, OUTPUT);
 
-// ============= CONFIGURACIÓN WIFI =============
-void setupWiFi() {
-  Serial.println("\n--- Configurando WiFi ---");
+  // PWM - Nueva API de ESP32 Arduino Core 3.x
+  ledcAttach(ENA, 5000, 8);  // pin, frecuencia, resolución
+  ledcAttach(ENB, 5000, 8);  // pin, frecuencia, resolución
+
+  aplicarVelocidad();
+  detener();
+
+  // HC-SR04
+  pinMode(TRIG_PIN, OUTPUT);
+  pinMode(ECHO_PIN, INPUT);
+  attachInterrupt(digitalPinToInterrupt(ECHO_PIN), echo_ISR, CHANGE);
+
+  // MPU6050
+  Wire.begin(22, 21);
+  mpu.initialize();
   
-  // Configurar ESP32 como Access Point
-  WiFi.mode(WIFI_AP);
-  WiFi.softAP(ssid, password);
-  
-  IPAddress IP = WiFi.softAPIP();
-  
-  Serial.print("✓ Access Point creado: ");
-  Serial.println(ssid);
-  Serial.print("✓ Contraseña: ");
-  Serial.println(password);
-  Serial.print("✓ Dirección IP: ");
-  Serial.println(IP);
-  
-  // Iniciar servidor
+  // Inicializar tiempo para cálculo de velocidad
+  tiempoAnterior = millis();
+
+  // WIFI
+  WiFi.begin(ssid, password);
+  Serial.print("Conectando");
+  while (WiFi.status() != WL_CONNECTED) { delay(300); Serial.print("."); }
+  Serial.println("\nWiFi conectado");
+  Serial.println(WiFi.localIP());
   server.begin();
-  Serial.println("✓ Servidor iniciado en puerto 80");
 }
 
-// ============= CONFIGURACIÓN DE MOTORES =============
-void setupMotors() {
-  Serial.println("\n--- Configurando motores ---");
-  
-  // Configurar pines como salida
-  pinMode(MOTOR_IZQ_ADELANTE, OUTPUT);
-  pinMode(MOTOR_IZQ_ATRAS, OUTPUT);
-  pinMode(MOTOR_DER_ADELANTE, OUTPUT);
-  pinMode(MOTOR_DER_ATRAS, OUTPUT);
-  
-  // Configurar PWM - Compatible con ESP32 Arduino Core 3.x
-  #if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
-    // Nueva API (ESP32 Core 3.x+)
-    ledcAttach(MOTOR_IZQ_PWM, PWM_FREQ, PWM_RESOLUTION);
-    ledcAttach(MOTOR_DER_PWM, PWM_FREQ, PWM_RESOLUTION);
-  #else
-    // API antigua (ESP32 Core 2.x)
-    ledcSetup(PWM_CHANNEL_IZQ, PWM_FREQ, PWM_RESOLUTION);
-    ledcSetup(PWM_CHANNEL_DER, PWM_FREQ, PWM_RESOLUTION);
-    ledcAttachPin(MOTOR_IZQ_PWM, PWM_CHANNEL_IZQ);
-    ledcAttachPin(MOTOR_DER_PWM, PWM_CHANNEL_DER);
-  #endif
-  
-  // Iniciar motores detenidos
-  motorDetener();
-  
-  Serial.println("✓ Motores configurados");
-  Serial.print("  - Motor Izq: Pines ");
-  Serial.print(MOTOR_IZQ_ADELANTE);
-  Serial.print(", ");
-  Serial.print(MOTOR_IZQ_ATRAS);
-  Serial.print(", PWM ");
-  Serial.println(MOTOR_IZQ_PWM);
-  Serial.print("  - Motor Der: Pines ");
-  Serial.print(MOTOR_DER_ADELANTE);
-  Serial.print(", ");
-  Serial.print(MOTOR_DER_ATRAS);
-  Serial.print(", PWM ");
-  Serial.println(MOTOR_DER_PWM);
-}
+// =========================
+// LOOP PRINCIPAL
+// =========================
+void loop() {
 
-// ============= PROCESAMIENTO DE COMANDOS =============
-void procesarComando(String comando) {
-  comando.toUpperCase();
-  
-  // Verificar si es un comando de velocidad específica
-  if (comando.startsWith("SPEED_SET:")) {
-    // Extraer el valor de velocidad
-    int separatorIndex = comando.indexOf(':');
-    if (separatorIndex > 0) {
-      String valorStr = comando.substring(separatorIndex + 1);
-      int valor = valorStr.toInt();
-      
-      if (valor >= 0 && valor <= 255) {
-        setVelocidad(valor);
-        Serial.print(" Velocidad ajustada: ");
-        Serial.println(valor);
-        return;
+  // 1. Calcular velocidad real con MPU6050
+  calcularVelocidad();
+
+  // 2. Evitar colisiones
+  float d = medirDistancia();
+  if (d > 0 && d < 20) {
+    Serial.println("⚠️ Obstáculo: " + String(d) + " cm");
+    detener();
+  }
+
+  // 3. Control por WiFi
+  WiFiClient client = server.available();
+  if (!client) return;
+
+  unsigned long lastSpeedUpdate = millis();
+
+  while (client.connected()) {
+    
+    // Actualizar velocidad continuamente
+    calcularVelocidad();
+    
+    // Enviar velocidad periódicamente cada 500ms
+    if (millis() - lastSpeedUpdate >= 500) {
+      float velReal = obtenerVelocidadReal();
+      client.println("SPEED:" + String(velReal, 2));
+      lastSpeedUpdate = millis();
+    }
+    
+    if (client.available()) {
+
+      // Leer comando completo (hasta nueva línea)
+      String comando = client.readStringUntil('\n');
+      comando.trim();
+
+      // -----------------------
+      // Comandos de velocidad específica
+      // -----------------------
+      if (comando.startsWith("SPEED_SET:")) {
+        int newSpeed = comando.substring(10).toInt();
+        if (newSpeed >= 0 && newSpeed <= 255) {
+          velocidad = newSpeed;
+          aplicarVelocidad();
+          Serial.println("Velocidad PWM = " + String(velocidad));
+          // Enviar velocidad real medida por MPU6050
+          float velReal = obtenerVelocidadReal();
+          client.println("SPEED:" + String(velReal, 2));
+        }
+      }
+      // Velocidad baja
+      else if (comando == "SPEED_LOW") {
+        velocidad = 150;
+        aplicarVelocidad();
+        Serial.println("Velocidad BAJA PWM = " + String(velocidad));
+        float velReal = obtenerVelocidadReal();
+        client.println("SPEED:" + String(velReal, 2));
+      }
+      // Velocidad alta
+      else if (comando == "SPEED_HIGH") {
+        velocidad = 255;
+        aplicarVelocidad();
+        Serial.println("Velocidad ALTA PWM = " + String(velocidad));
+        float velReal = obtenerVelocidadReal();
+        client.println("SPEED:" + String(velReal, 2));
+      }
+      // -----------------------
+      // Movimientos
+      // -----------------------
+      else if (comando == "FORWARD") {
+        Serial.println(">>> COMANDO: AVANZAR");
+        avanzar();
+        client.println("OK:FORWARD");
+      }
+      else if (comando == "BACKWARD") {
+        Serial.println(">>> COMANDO: RETROCEDER");
+        retroceder();
+        client.println("OK:BACKWARD");
+      }
+      else if (comando == "LEFT") {
+        Serial.println(">>> COMANDO: GIRAR IZQUIERDA");
+        girarIzquierda();
+        client.println("OK:LEFT");
+      }
+      else if (comando == "RIGHT") {
+        Serial.println(">>> COMANDO: GIRAR DERECHA");
+        girarDerecha();
+        client.println("OK:RIGHT");
+      }
+      else if (comando == "STOP") {
+        Serial.println(">>> COMANDO: DETENER");
+        detener();
+        client.println("OK:STOP");
+      }
+      // Comando para consultar velocidad
+      else if (comando == "GET_SPEED") {
+        float velReal = obtenerVelocidadReal();
+        client.println("SPEED:" + String(velReal, 2));  // Velocidad en cm/s con 2 decimales
       }
     }
   }
-  
-  // Comandos normales
-  if (comando == "FORWARD") {
-    comandoActual = comando;
-    motorAdelante();
-  }
-  else if (comando == "BACKWARD") {
-    comandoActual = comando;
-    motorAtras();
-  }
-  else if (comando == "LEFT") {
-    comandoActual = comando;
-    motorIzquierda();
-  }
-  else if (comando == "RIGHT") {
-    comandoActual = comando;
-    motorDerecha();
-  }
-  else if (comando == "STOP") {
-    comandoActual = comando;
-    motorDetener();
-  }
-  else if (comando == "SPEED_LOW") {
-    setVelocidad(150);
-    Serial.println(" Velocidad BAJA");
-  }
-  else if (comando == "SPEED_HIGH") {
-    setVelocidad(255);
-    Serial.println(" Velocidad ALTA");
-  }
-  else {
-    Serial.print("⚠ Comando desconocido: ");
-    Serial.println(comando);
-  }
+
+  client.stop();
 }
-
-// ============= CONTROL DE MOTORES =============
-
-void motorAdelante() {
-  Serial.println("↑ ADELANTE");
-  
-  // Motor izquierdo adelante
-  digitalWrite(MOTOR_IZQ_ADELANTE, HIGH);
-  digitalWrite(MOTOR_IZQ_ATRAS, LOW);
-  
-  // Motor derecho adelante
-  digitalWrite(MOTOR_DER_ADELANTE, HIGH);
-  digitalWrite(MOTOR_DER_ATRAS, LOW);
-  
-  // Aplicar velocidad
-  #if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
-    ledcWrite(MOTOR_IZQ_PWM, velocidadActual);
-    ledcWrite(MOTOR_DER_PWM, velocidadActual);
-  #else
-    ledcWrite(PWM_CHANNEL_IZQ, velocidadActual);
-    ledcWrite(PWM_CHANNEL_DER, velocidadActual);
-  #endif
-  
-  motorActivo = true;
-}
-
-void motorAtras() {
-  Serial.println("↓ ATRÁS");
-  
-  // Motor izquierdo atrás
-  digitalWrite(MOTOR_IZQ_ADELANTE, LOW);
-  digitalWrite(MOTOR_IZQ_ATRAS, HIGH);
-  
-  // Motor derecho atrás
-  digitalWrite(MOTOR_DER_ADELANTE, LOW);
-  digitalWrite(MOTOR_DER_ATRAS, HIGH);
-  
-  // Aplicar velocidad
-  #if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
-    ledcWrite(MOTOR_IZQ_PWM, velocidadActual);
-    ledcWrite(MOTOR_DER_PWM, velocidadActual);
-  #else
-    ledcWrite(PWM_CHANNEL_IZQ, velocidadActual);
-    ledcWrite(PWM_CHANNEL_DER, velocidadActual);
-  #endif
-  
-  motorActivo = true;
-}
-
-void motorIzquierda() {
-  Serial.println("← IZQUIERDA");
-  
-  // Motor izquierdo atrás (o detenido)
-  digitalWrite(MOTOR_IZQ_ADELANTE, LOW);
-  digitalWrite(MOTOR_IZQ_ATRAS, HIGH);
-  
-  // Motor derecho adelante
-  digitalWrite(MOTOR_DER_ADELANTE, HIGH);
-  digitalWrite(MOTOR_DER_ATRAS, LOW);
-  
-  // Aplicar velocidad (puede ser menor para giro más suave)
-  #if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
-    ledcWrite(MOTOR_IZQ_PWM, velocidadActual * 0.7);  // Motor izq más lento
-    ledcWrite(MOTOR_DER_PWM, velocidadActual);         // Motor der normal
-  #else
-    ledcWrite(PWM_CHANNEL_IZQ, velocidadActual * 0.7);  // Motor izq más lento
-    ledcWrite(PWM_CHANNEL_DER, velocidadActual);         // Motor der normal
-  #endif
-  
-  motorActivo = true;
-}
-
-void motorDerecha() {
-  Serial.println("→ DERECHA");
-  
-  // Motor izquierdo adelante
-  digitalWrite(MOTOR_IZQ_ADELANTE, HIGH);
-  digitalWrite(MOTOR_IZQ_ATRAS, LOW);
-  
-  // Motor derecho atrás (o detenido)
-  digitalWrite(MOTOR_DER_ADELANTE, LOW);
-  digitalWrite(MOTOR_DER_ATRAS, HIGH);
-  
-  // Aplicar velocidad
-  #if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
-    ledcWrite(MOTOR_IZQ_PWM, velocidadActual);         // Motor izq normal
-    ledcWrite(MOTOR_DER_PWM, velocidadActual * 0.7);  // Motor der más lento
-  #else
-    ledcWrite(PWM_CHANNEL_IZQ, velocidadActual);         // Motor izq normal
-    ledcWrite(PWM_CHANNEL_DER, velocidadActual * 0.7);  // Motor der más lento
-  #endif
-  
-  motorActivo = true;
-}
-
-void motorDetener() {
-  Serial.println("■ STOP");
-  
-  // Detener ambos motores
-  digitalWrite(MOTOR_IZQ_ADELANTE, LOW);
-  digitalWrite(MOTOR_IZQ_ATRAS, LOW);
-  digitalWrite(MOTOR_DER_ADELANTE, LOW);
-  digitalWrite(MOTOR_DER_ATRAS, LOW);
-  
-  // PWM a 0
-  #if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
-    ledcWrite(MOTOR_IZQ_PWM, 0);
-    ledcWrite(MOTOR_DER_PWM, 0);
-  #else
-    ledcWrite(PWM_CHANNEL_IZQ, 0);
-    ledcWrite(PWM_CHANNEL_DER, 0);
-  #endif
-  
-  motorActivo = false;
-}
-
-// ============= CONTROL DE VELOCIDAD =============
-void setVelocidad(int velocidad) {
-  // Limitar velocidad entre 0 y 255
-  velocidadActual = constrain(velocidad, 0, 255);
-  
-  Serial.print("Velocidad ajustada a: ");
-  Serial.println(velocidadActual);
-  
-  // Si los motores están activos, actualizar velocidad
-  if (motorActivo) {
-    // Re-procesar el comando actual para aplicar nueva velocidad
-    procesarComando(comandoActual);
-  }
-}
-
-// ============= UTILIDADES =============
-void parpadearLED(int veces) {
-  for (int i = 0; i < veces; i++) {
-    digitalWrite(LED_PIN, HIGH);
-    delay(100);
-    digitalWrite(LED_PIN, LOW);
-    delay(100);
-  }
-}
-
-// ============= DETECCIÓN DE COLISIÓN =============
-void verificarColision() {
-  // FUNCIÓN DESACTIVADA - Usar comando 'R' en Serial Monitor para pruebas
-  // Para activar sensor físico, descomentar el código siguiente:
-  
-  /*
-  // Leer sensor de colisión (LOW = colisión detectada con pull-up)
-  int sensorValue = digitalRead(SENSOR_COLISION);
-  
-  if (sensorValue == LOW) {
-    unsigned long tiempoActual = millis();
-    if (tiempoActual - ultimaColision > 1000) { // 1 segundo de cooldown
-      Serial.println("\n⚠️ ¡COLISIÓN DETECTADA!");
-      motorDetener();
-      parpadearLED(5);
-      colisionDetectada = true;
-      ultimaColision = tiempoActual;
-    }
-  }
-  */
-}
-
-void enviarAlertaColision(WiFiClient &client) {
-  // Enviar mensaje de alerta al cliente
-  if (client.connected()) {
-    client.println("COLISION_DETECTADA");
-    Serial.println("→ Alerta de colisión enviada al cliente");
-  }
-}
-
