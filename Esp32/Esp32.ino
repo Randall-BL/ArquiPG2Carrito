@@ -6,8 +6,8 @@
 // -------------------------
 // WIFI
 // -------------------------
-const char* ssid = "XXXXX";
-const char* password = "XXXXXXX";
+const char* ssid = "xxxxx";
+const char* password = "xxxxx";
 WiFiServer server(9000);
 
 // -------------------------
@@ -18,10 +18,16 @@ WiFiServer server(9000);
 #define IN3 27
 #define IN4 14
 
-#define ENA 32   // PWM Motor A
-#define ENB 33   // PWM Motor B
+#define ENA 32   // PWM Motor A (Tracción)
+#define ENB 33   // PWM Motor B (Dirección)
 
-int velocidad = 200;   // valor inicial PWM (0–255)
+int velocidad = 200;   // valor inicial PWM (0-255)
+
+// Estado de movimiento
+bool moviendoAdelante = false;
+bool moviendoAtras = false;
+bool girandoDerecha = false;
+bool girandoIzquierda = false;
 
 // -------------------------
 // HC-SR04
@@ -42,19 +48,36 @@ MPU6050 mpu;
 float velocidadActual = 0.0;  // cm/s
 float velocidadAnterior = 0.0;
 unsigned long tiempoAnterior = 0;
-int16_t ax_anterior = 0;
-int16_t ay_anterior = 0;
 
 // Constante de conversión del acelerómetro
-const float ACCEL_SCALE = 16384.0;  // Para ±2g
-const float GRAVITY = 980.0;  // cm/s²
+const float ACCEL_SCALE = 16384.0;  // Para 2g
+const float GRAVITY = 980.0;  // cm/s
+
+// -------------------------
+// SISTEMA DE DETECCIÓN DE OBSTÁCULOS
+// -------------------------
+const float DISTANCIA_INICIO_FRENADO = 120.0;  // cm - Inicia desaceleración
+const float DISTANCIA_DETENCION = 25.0;        // cm - Debe estar detenido
+const float DISTANCIA_REVERSA = 20.0;          // cm - Activa reversa
+const int VELOCIDAD_REVERSA = 255;             // PWM para reversa
+
+bool modoFrenadoAutomatico = false;  // Indica si está frenando automáticamente
+bool modoReversaAutomatica = false;  // Indica si está en reversa automática
+int velocidadDeseada = 200;          // Velocidad que el usuario quiere
+int velocidadOriginal = 200;                  // Velocidad antes del frenado
+
+// -------------------------
+// TIMING
+// -------------------------
+unsigned long lastSensorCheck = 0;
+unsigned long lastSpeedUpdate = 0;
 
 // =========================
 // FUNCIONES DE MOTORES
 // =========================
 void aplicarVelocidad() {
-  ledcWrite(ENA, velocidad);  // ENA - Motor de tracción (usa velocidad variable)
-  ledcWrite(ENB, 255);        // ENB - Motor de dirección (siempre a máxima potencia)
+  ledcWrite(ENA, velocidad);  // ENA - Motor de tracción
+  ledcWrite(ENB, 255);        // ENB - Motor de dirección (siempre máxima)
 }
 
 void detener() {
@@ -62,58 +85,66 @@ void detener() {
   digitalWrite(IN2, LOW);
   digitalWrite(IN3, LOW);
   digitalWrite(IN4, LOW);
+  moviendoAdelante = false;
+  moviendoAtras = false;
+  girandoDerecha = false;
+  girandoIzquierda = false;
+}
+
+void retrocederAutomatico() {
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, HIGH);
+  digitalWrite(IN3, LOW);
+  digitalWrite(IN4, LOW);
+  ledcWrite(ENA, VELOCIDAD_REVERSA);
+  ledcWrite(ENB, 255);
 }
 
 void avanzar() {
-  // IN1/IN2: Tracción ADELANTE
-  digitalWrite(IN1, HIGH);
-  digitalWrite(IN2, LOW);
-
-  // IN3/IN4: Dirección NEUTRAL (recto)
-  //digitalWrite(IN3, LOW);
-  //digitalWrite(IN4, LOW);
-
-  aplicarVelocidad();
+  if (!modoFrenadoAutomatico && !modoReversaAutomatica) {
+    digitalWrite(IN1, HIGH);
+    digitalWrite(IN2, LOW);
+    moviendoAdelante = true;
+    moviendoAtras = false;
+    aplicarVelocidad();
+  }
 }
 
 void retroceder() {
-  // IN1/IN2: Tracción ATRÁS
+  // Retroceder SIEMPRE obedece el comando del usuario
+  // Cancela cualquier modo automático activo
+  modoFrenadoAutomatico = false;
+  modoReversaAutomatica = false;
+  
   digitalWrite(IN1, LOW);
   digitalWrite(IN2, HIGH);
-
-  // IN3/IN4: Dirección NEUTRAL (recto)
-  //digitalWrite(IN3, LOW);
-  //digitalWrite(IN4, LOW);
-
+  moviendoAdelante = false;
+  moviendoAtras = true;
   aplicarVelocidad();
 }
 
 void girarDerecha() {
-  // IN1/IN2: Sin tracción (o tracción adelante para girar en movimiento)
-  //digitalWrite(IN1, LOW);
-  //digitalWrite(IN2, LOW);
-
-  // IN3/IN4: Dirección DERECHA
-  digitalWrite(IN3, HIGH);
-  digitalWrite(IN4, LOW);
-
-  aplicarVelocidad();
+  if (!modoFrenadoAutomatico && !modoReversaAutomatica) {
+    digitalWrite(IN3, HIGH);
+    digitalWrite(IN4, LOW);
+    girandoDerecha = true;
+    girandoIzquierda = false;
+    aplicarVelocidad();
+  }
 }
 
 void girarIzquierda() {
-  // IN1/IN2: Sin tracción (o tracción adelante para girar en movimiento)
-  //digitalWrite(IN1, LOW);
-  //digitalWrite(IN2, LOW);
-
-  // IN3/IN4: Dirección IZQUIERDA
-  digitalWrite(IN3, LOW);
-  digitalWrite(IN4, HIGH);
-
-  aplicarVelocidad();
+  if (!modoFrenadoAutomatico && !modoReversaAutomatica) {
+    digitalWrite(IN3, LOW);
+    digitalWrite(IN4, HIGH);
+    girandoDerecha = false;
+    girandoIzquierda = true;
+    aplicarVelocidad();
+  }
 }
 
 // =========================
-//   INTERRUPCIÓN HC-SR04
+// INTERRUPCIÓN HC-SR04
 // =========================
 void IRAM_ATTR echo_ISR() {
   if (digitalRead(ECHO_PIN) == HIGH) {
@@ -126,7 +157,6 @@ void IRAM_ATTR echo_ISR() {
 
 float medirDistancia() {
   pulseDone = false;
-
   digitalWrite(TRIG_PIN, LOW);
   delayMicroseconds(5);
   digitalWrite(TRIG_PIN, HIGH);
@@ -150,33 +180,24 @@ void calcularVelocidad() {
   mpu.getAcceleration(&ax, &ay, &az);
   
   unsigned long tiempoActual = millis();
-  float deltaT = (tiempoActual - tiempoAnterior) / 1000.0;  // Convertir a segundos
+  float deltaT = (tiempoActual - tiempoAnterior) / 1000.0;
   
-  if (deltaT > 0 && deltaT < 1.0) {  // Evitar divisiones extrañas
-    // Convertir aceleración a cm/s²
+  if (deltaT > 0 && deltaT < 1.0) {
     float accelX = (ax / ACCEL_SCALE) * GRAVITY;
     float accelY = (ay / ACCEL_SCALE) * GRAVITY;
-    
-    // Calcular magnitud de aceleración horizontal (plano XY)
     float accelMagnitud = sqrt(accelX * accelX + accelY * accelY);
     
-    // Aplicar umbral para eliminar ruido cuando está detenido
-    if (abs(accelMagnitud) < 50.0) {  // Umbral de ruido
+    if (abs(accelMagnitud) < 50.0) {
       accelMagnitud = 0;
     }
     
-    // Integrar aceleración para obtener velocidad: v = v0 + a*t
     velocidadActual = velocidadAnterior + (accelMagnitud * deltaT);
-    
-    // Aplicar factor de decaimiento (simulación de fricción)
     velocidadActual *= 0.95;
     
-    // Si el carrito está detenido (PWM = 0 o muy bajo), resetear velocidad
     if (velocidad < 50) {
-      velocidadActual *= 0.7;  // Decaimiento rápido
+      velocidadActual *= 0.7;
     }
     
-    // Limitar velocidad a valores razonables (0-200 cm/s ≈ 0-7 km/h)
     if (velocidadActual < 0) velocidadActual = 0;
     if (velocidadActual > 200) velocidadActual = 200;
     
@@ -186,155 +207,201 @@ void calcularVelocidad() {
   tiempoAnterior = tiempoActual;
 }
 
-float obtenerVelocidadReal() {
-  return velocidadActual;  // En cm/s
+// =========================
+// VERIFICACIÓN DE SENSORES Y SEGURIDAD
+// =========================
+void verificarSensoresSeguridad() {
+  calcularVelocidad();
+  float d = medirDistancia();
+  
+  if (d > 0) {
+    if (d < DISTANCIA_REVERSA) {
+      if (!modoReversaAutomatica) {
+        Serial.println("EMERGENCIA! Reversa automatica a " + String(d) + " cm");
+        modoReversaAutomatica = true;
+        modoFrenadoAutomatico = false;
+      }
+      retrocederAutomatico();
+    }
+    else if (d < DISTANCIA_DETENCION) {
+      if (!modoFrenadoAutomatico || velocidad > 0) {
+        Serial.println("DETENCION! Obstaculo a " + String(d) + " cm");
+        modoFrenadoAutomatico = true;
+        modoReversaAutomatica = false;
+        velocidad = 0;
+        detener();
+      }
+    }
+    else if (d < DISTANCIA_INICIO_FRENADO) {
+      if (!modoFrenadoAutomatico) {
+        Serial.println("Iniciando frenado gradual a " + String(d) + " cm");
+        velocidadOriginal = velocidadDeseada;
+        modoFrenadoAutomatico = true;
+      }
+      modoReversaAutomatica = false;
+      float factor = (d - DISTANCIA_DETENCION) / (DISTANCIA_INICIO_FRENADO - DISTANCIA_DETENCION);
+      factor = constrain(factor, 0.0, 1.0);
+      velocidad = (int)(velocidadOriginal * factor);
+      velocidad = constrain(velocidad, 0, 255);
+      aplicarVelocidad();
+    }
+    else {
+      if (modoFrenadoAutomatico || modoReversaAutomatica) {
+        Serial.println("Zona segura. Restaurando control normal.");
+        modoFrenadoAutomatico = false;
+        modoReversaAutomatica = false;
+        velocidad = velocidadDeseada;
+        aplicarVelocidad();
+      }
+    }
+  }
 }
-
 
 // =========================
 // SETUP
 // =========================
 void setup() {
   Serial.begin(115200);
+  Serial.println("\nIniciando Sistema de Control");
 
-  // Pines motores
   pinMode(IN1, OUTPUT);
   pinMode(IN2, OUTPUT);
   pinMode(IN3, OUTPUT);
   pinMode(IN4, OUTPUT);
 
-  // PWM - Nueva API de ESP32 Arduino Core 3.x
-  ledcAttach(ENA, 5000, 8);  // pin, frecuencia, resolución
-  ledcAttach(ENB, 5000, 8);  // pin, frecuencia, resolución
-
+  ledcAttach(ENA, 5000, 8);
+  ledcAttach(ENB, 5000, 8);
   aplicarVelocidad();
   detener();
 
-  // HC-SR04
   pinMode(TRIG_PIN, OUTPUT);
   pinMode(ECHO_PIN, INPUT);
   attachInterrupt(digitalPinToInterrupt(ECHO_PIN), echo_ISR, CHANGE);
 
-  // MPU6050
   Wire.begin(22, 21);
   mpu.initialize();
-  
-  // Inicializar tiempo para cálculo de velocidad
   tiempoAnterior = millis();
 
-  // WIFI
   WiFi.begin(ssid, password);
-  Serial.print("Conectando");
-  while (WiFi.status() != WL_CONNECTED) { delay(300); Serial.print("."); }
+  Serial.print("Conectando WiFi");
+  while (WiFi.status() != WL_CONNECTED) { 
+    delay(300); 
+    Serial.print("."); 
+  }
   Serial.println("\nWiFi conectado");
-  Serial.println(WiFi.localIP());
+  Serial.println("IP: " + WiFi.localIP().toString());
   server.begin();
+
+  lastSensorCheck = millis();
+  lastSpeedUpdate = millis();
+
+  Serial.println("Sistema iniciado");
 }
 
 // =========================
 // LOOP PRINCIPAL
 // =========================
 void loop() {
-
-  // 1. Calcular velocidad real con MPU6050
-  calcularVelocidad();
-
-  // 2. Evitar colisiones
-  float d = medirDistancia();
-  if (d > 0 && d < 20) {
-    Serial.println("⚠️ Obstáculo: " + String(d) + " cm");
-    detener();
+  // Verificar sensores cada 50ms
+  if (millis() - lastSensorCheck >= 50) {
+    verificarSensoresSeguridad();
+    lastSensorCheck = millis();
   }
 
-  // 3. Control por WiFi
+  // Manejar cliente WiFi
   WiFiClient client = server.available();
-  if (!client) return;
-
-  unsigned long lastSpeedUpdate = millis();
-
-  while (client.connected()) {
+  if (client) {
+    Serial.println("Cliente conectado");
+    lastSpeedUpdate = millis();
     
-    // Actualizar velocidad continuamente
-    calcularVelocidad();
-    
-    // Enviar velocidad periódicamente cada 500ms
-    if (millis() - lastSpeedUpdate >= 500) {
-      float velReal = obtenerVelocidadReal();
-      client.println("SPEED:" + String(velReal, 2));
-      lastSpeedUpdate = millis();
-    }
-    
-    if (client.available()) {
-
-      // Leer comando completo (hasta nueva línea)
-      String comando = client.readStringUntil('\n');
-      comando.trim();
-
-      // -----------------------
-      // Comandos de velocidad específica
-      // -----------------------
-      if (comando.startsWith("SPEED_SET:")) {
-        int newSpeed = comando.substring(10).toInt();
-        if (newSpeed >= 0 && newSpeed <= 255) {
-          velocidad = newSpeed;
-          aplicarVelocidad();
-          Serial.println("Velocidad PWM = " + String(velocidad));
-          // Enviar velocidad real medida por MPU6050
-          float velReal = obtenerVelocidadReal();
-          client.println("SPEED:" + String(velReal, 2));
+    while (client.connected()) {
+      // Verificar sensores durante la conexión
+      if (millis() - lastSensorCheck >= 50) {
+        verificarSensoresSeguridad();
+        lastSensorCheck = millis();
+      }
+      
+      // Enviar velocidad cada 500ms
+      if (millis() - lastSpeedUpdate >= 500) {
+        client.println("SPEED:" + String(velocidadActual, 2));
+        lastSpeedUpdate = millis();
+      }
+      
+      // Procesar comandos
+      if (client.available()) {
+        String comando = client.readStringUntil('\n');
+        comando.trim();
+        Serial.println("Recibido: " + comando);
+        
+        if (comando.startsWith("SPEED_SET:")) {
+          int newSpeed = comando.substring(10).toInt();
+          if (newSpeed >= 0 && newSpeed <= 255) {
+            velocidadDeseada = newSpeed;
+            if (!modoFrenadoAutomatico && !modoReversaAutomatica) {
+              velocidad = newSpeed;
+              aplicarVelocidad();
+              Serial.println("Velocidad PWM = " + String(velocidad));
+            }
+            client.println("SPEED:" + String(velocidadActual, 2));
+          }
+        }
+        else if (comando == "SPEED_LOW") {
+          velocidadDeseada = 150;
+          if (!modoFrenadoAutomatico && !modoReversaAutomatica) {
+            velocidad = 150;
+            aplicarVelocidad();
+          }
+          client.println("SPEED:" + String(velocidadActual, 2));
+        }
+        else if (comando == "SPEED_HIGH") {
+          velocidadDeseada = 255;
+          if (!modoFrenadoAutomatico && !modoReversaAutomatica) {
+            velocidad = 255;
+            aplicarVelocidad();
+          }
+          client.println("SPEED:" + String(velocidadActual, 2));
+        }
+        else if (comando == "FORWARD") {
+          if (!modoFrenadoAutomatico && !modoReversaAutomatica) {
+            avanzar();
+            Serial.println("CMD: FORWARD");
+          }
+          client.println("OK:FORWARD");
+        }
+        else if (comando == "BACKWARD") {
+          // BACKWARD siempre se ejecuta, sin importar modos automáticos
+          retroceder();
+          Serial.println("CMD: BACKWARD (forzado)");
+          client.println("OK:BACKWARD");
+        }
+        else if (comando == "LEFT") {
+          if (!modoFrenadoAutomatico && !modoReversaAutomatica) {
+            girarIzquierda();
+            Serial.println("CMD: LEFT");
+          }
+          client.println("OK:LEFT");
+        }
+        else if (comando == "RIGHT") {
+          if (!modoFrenadoAutomatico && !modoReversaAutomatica) {
+            girarDerecha();
+            Serial.println("CMD: RIGHT");
+          }
+          client.println("OK:RIGHT");
+        }
+        else if (comando == "STOP") {
+          detener();
+          Serial.println("CMD: STOP");
+          client.println("OK:STOP");
+        }
+        else if (comando == "GET_SPEED") {
+          client.println("SPEED:" + String(velocidadActual, 2));
         }
       }
-      // Velocidad baja
-      else if (comando == "SPEED_LOW") {
-        velocidad = 150;
-        aplicarVelocidad();
-        Serial.println("Velocidad BAJA PWM = " + String(velocidad));
-        float velReal = obtenerVelocidadReal();
-        client.println("SPEED:" + String(velReal, 2));
-      }
-      // Velocidad alta
-      else if (comando == "SPEED_HIGH") {
-        velocidad = 255;
-        aplicarVelocidad();
-        Serial.println("Velocidad ALTA PWM = " + String(velocidad));
-        float velReal = obtenerVelocidadReal();
-        client.println("SPEED:" + String(velReal, 2));
-      }
-      // -----------------------
-      // Movimientos
-      // -----------------------
-      else if (comando == "FORWARD") {
-        Serial.println(">>> COMANDO: AVANZAR");
-        avanzar();
-        client.println("OK:FORWARD");
-      }
-      else if (comando == "BACKWARD") {
-        Serial.println(">>> COMANDO: RETROCEDER");
-        retroceder();
-        client.println("OK:BACKWARD");
-      }
-      else if (comando == "LEFT") {
-        Serial.println(">>> COMANDO: GIRAR IZQUIERDA");
-        girarIzquierda();
-        client.println("OK:LEFT");
-      }
-      else if (comando == "RIGHT") {
-        Serial.println(">>> COMANDO: GIRAR DERECHA");
-        girarDerecha();
-        client.println("OK:RIGHT");
-      }
-      else if (comando == "STOP") {
-        Serial.println(">>> COMANDO: DETENER");
-        detener();
-        client.println("OK:STOP");
-      }
-      // Comando para consultar velocidad
-      else if (comando == "GET_SPEED") {
-        float velReal = obtenerVelocidadReal();
-        client.println("SPEED:" + String(velReal, 2));  // Velocidad en cm/s con 2 decimales
-      }
+      
+      delay(5);
     }
+    
+    client.stop();
+    Serial.println("Cliente desconectado");
   }
-
-  client.stop();
 }
