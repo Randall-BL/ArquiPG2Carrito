@@ -14,32 +14,30 @@ Código para ESP32 que permite controlar un carrito mediante comandos WiFi desde
 
 ### ESP32 → L298N (Puente H)
 
-#### Motor Izquierdo
+#### Motor Tracción
 | ESP32 Pin | L298N Pin | Función |
 |-----------|-----------|---------|
-| GPIO 26   | IN1       | Dirección adelante |
-| GPIO 27   | IN2       | Dirección atrás |
-| GPIO 14   | ENA       | Control PWM velocidad |
+| GPIO 25   | IN1       | Dirección adelante |
+| GPIO 26   | IN2       | Dirección atrás |
+| GPIO 32   | ENA       | Control PWM velocidad |
 
-#### Motor Derecho
+#### Motor Dirrección
 | ESP32 Pin | L298N Pin | Función |
 |-----------|-----------|---------|
-| GPIO 25   | IN3       | Dirección adelante |
-| GPIO 33   | IN4       | Dirección atrás |
-| GPIO 32   | ENB       | Control PWM velocidad |
+| GPIO 27   | IN3       | Dirección derecha |
+| GPIO 14   | IN4       | Dirección izquierda |
+| GPIO 33   | ENB       | Control PWM velocidad |
 
 #### Alimentación
 | Conexión | Descripción |
 |----------|-------------|
 | L298N +12V | Batería positivo (6-12V) |
 | L298N GND | GND común (ESP32 + Batería) |
-| ESP32 VIN | 5V del L298N (si tiene regulador) o batería/powerbank |
+| ESP32 VIN | 5V del L298N  |
 | ESP32 GND | GND común |
 
 ⚠️ **IMPORTANTE**: 
 - El ESP32 y el L298N deben compartir GND
-- NO alimentes el ESP32 con más de 5V en VIN
-- Usa una fuente separada para los motores
 
 ## 🛠️ Instalación
 
@@ -61,7 +59,7 @@ Código para ESP32 que permite controlar un carrito mediante comandos WiFi desde
 
 ### 3. Cargar el Código
 
-1. Abre el archivo `carrito_control.ino` en Arduino IDE
+1. Abre el archivo `Esp32.ino` en Arduino IDE
 2. Selecciona tu placa ESP32:
    - **Herramientas → Placa → ESP32 Arduino → ESP32 Dev Module**
 3. Selecciona el puerto COM correcto:
@@ -89,14 +87,14 @@ Si tu conexión física es diferente, modifica estos valores:
 
 ```cpp
 // Motor Izquierdo
-const int MOTOR_IZQ_ADELANTE = 26;
-const int MOTOR_IZQ_ATRAS = 27;
-const int MOTOR_IZQ_PWM = 14;
+#define IN1 25 // Dirreción ADELANTE
+#define IN2 26 // Dirreción Atras
+#define IN3 27 // Dirreción Derecha
+#define IN4 14 // Dirección Izquierda
 
-// Motor Derecho
-const int MOTOR_DER_ADELANTE = 25;
-const int MOTOR_DER_ATRAS = 33;
-const int MOTOR_DER_PWM = 32;
+#define ENA 32   // PWM Motor A (Tracción)
+#define ENB 33   // PWM Motor B (Dirección)
+
 ```
 
 ### Ajustar Velocidades
@@ -182,34 +180,6 @@ El ESP32 recibe comandos de texto terminados en `\n`:
 3. Verifica la contraseña (12345678)
 4. Asegúrate de que la IP en Python sea 192.168.4.1
 
-## 🔧 Personalización
-
-### Cambiar comportamiento de giros
-
-Para giros en el lugar (un motor adelante, otro atrás):
-
-```cpp
-void motorIzquierda() {
-  digitalWrite(MOTOR_IZQ_ADELANTE, LOW);
-  digitalWrite(MOTOR_IZQ_ATRAS, HIGH);  // Izq atrás
-  digitalWrite(MOTOR_DER_ADELANTE, HIGH); // Der adelante
-  digitalWrite(MOTOR_DER_ATRAS, LOW);
-  
-  ledcWrite(PWM_CHANNEL_IZQ, velocidadActual);
-  ledcWrite(PWM_CHANNEL_DER, velocidadActual);
-}
-```
-
-### Agregar más velocidades
-
-Agrega más casos en `procesarComando()`:
-
-```cpp
-else if (comando == "SPEED_MEDIUM") {
-  setVelocidad(200);
-  Serial.println("🚗 Velocidad MEDIA");
-}
-```
 
 ## 📊 Diagrama de Conexión
 
@@ -234,22 +204,3 @@ else if (comando == "SPEED_MEDIUM") {
                    |
               Batería 6-12V
 ```
-
-## 📝 Notas
-
-- El LED integrado (GPIO 2) parpadea al conectar/desconectar
-- El sistema soporta múltiples reconexiones
-- La velocidad se puede cambiar en tiempo real
-- Los motores se detienen automáticamente al desconectar
-
-## 🆘 Soporte
-
-Si tienes problemas:
-1. Revisa el Monitor Serie para mensajes de error
-2. Verifica todas las conexiones físicas
-3. Prueba con velocidades más bajas primero
-4. Asegúrate de que la alimentación sea adecuada
-
-## 📜 Licencia
-
-Proyecto educativo para Arquitectura de Computadores
