@@ -1,0 +1,16 @@
+{
+  "timestamp": "2025-11-22T22:15:00.646867",
+  "logs": [
+    "[75s] CMD: IZQUIERDA",
+    "[76s] CMD: IZQUIERDA",
+    "[77s] Frenado gradual iniciado a 118.2cm",
+    "[77s] Zona segura. Control normal restaurado",
+    "[77s] Frenado gradual iniciado a 109.8cm",
+    "[78s] CMD: DETENER",
+    "[78s] CMD: DETENER",
+    "[79s] CMD: DETENER",
+    "[80s] CMD: DETENER",
+    "[81s] CMD: DETENER"
+  ],
+  "total_logs": 10
+}
