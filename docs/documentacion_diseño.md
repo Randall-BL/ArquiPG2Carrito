@@ -1,11 +1,102 @@
 # Documentación de Diseño 
-**Proyecto:**  Robot basado en microcontrolador  
+**Proyecto:** Robot basado en microcontrolador  
 **Versión:** 1.0  
 **MCU:** ESP32
 
 ---
 
+# 1. Diseño de Hardware
 
+Esta sección detalla el diseño físico y electrónico del robot, cubriendo la selección de componentes, interconexiones, implementación del circuito y análisis energético, cumpliendo con los requerimientos de ingeniería del sistema.
+
+## 1.1 Selección y justificación del microcontrolador
+
+Para este proyecto se seleccionó el **ESP32 (SoC Espressif Systems)** en su formato de placa de desarrollo NodeMCU. A continuación, se presenta una comparativa técnica frente a otras alternativas, justificando su elección.
+
+| Característica | Arduino Uno (ATmega328P) | **ESP32 (Seleccionado)** | Justificación para el proyecto |
+| :--- | :--- | :--- | :--- |
+| **Arquitectura** | 8-bit AVR | **32-bit Xtensa LX6 (Dual Core)** | Necesario para procesar la pila TCP/IP y la lógica de control simultáneamente sin latencia. |
+| **Velocidad de Reloj** | 16 MHz | **80 - 240 MHz** | Permite cálculos rápidos para la integración numérica del acelerómetro (MPU6050). |
+| **Conectividad** | Ninguna | **WiFi 802.11 b/g/n + BT** | **Crítico:** El requisito de control remoto vía servidor TCP hace indispensable el WiFi nativo. |
+| **Memoria Flash** | 32 KB | **4 MB** | Soporte holgado para bibliotecas de red (`WiFi.h`). |
+| **Voltaje Lógico** | 5V | **3.3V** | Compatible directamente con sensores modernos (MPU6050). |
+
+**Conclusión:** El ESP32 es superior debido a su capacidad de **multiprocesamiento (Dual Core)**, permitiendo dedicar un núcleo a la gestión de la comunicación WiFi y otro al control de tiempo real de los motores y sensores.
+
+## 1.2 Diagramas de conexión
+
+El sistema sigue el siguiente mapeo de conexiones (Netlist) entre el microcontrolador y los periféricos, validado en la configuración del firmware:
+
+| Componente | Pin del Componente | Pin ESP32 (GPIO) | Descripción |
+| :--- | :--- | :--- | :--- |
+| **L298N (Motor A)** | ENA (PWM) | **GPIO 32** | Control de velocidad Tracción |
+| | IN1 | **GPIO 25** | Dirección Tracción (Puente H) |
+| | IN2 | **GPIO 26** | Dirección Tracción (Puente H) |
+| **L298N (Motor B)** | ENB (PWM) | **GPIO 33** | Control de velocidad Dirección |
+| | IN3 | **GPIO 27** | Dirección Giro (Puente H) |
+| | IN4 | **GPIO 14** | Dirección Giro (Puente H) |
+| **MPU6050** | SDA | **GPIO 22** | Bus de Datos I²C |
+| | SCL | **GPIO 21** | Reloj I²C |
+| **HC-SR04** | TRIG | **GPIO 4** | Disparo de pulso |
+| | ECHO | **GPIO 5** | Lectura de eco (Interrupción) |
+
+## 1.3 Especificaciones de sensores y actuadores
+
+**Actuadores (Motores y Drivers):**
+* **Motores DC con Reductora (TT Motor):**
+  * Voltaje operativo: 3V - 6V DC.
+  * Relación de transmisión: 1:48.
+  * Torque máximo: 0.8 kg·cm (a 5V).
+  * *Función:* Proporcionan el torque necesario para la tracción diferencial.
+* **Driver L298N (Puente H):**
+  * Corriente máxima: 2A por canal.
+  * *Función:* Aislación de potencia y control PWM de velocidad.
+
+**Sensores:**
+* **MPU6050 (Acelerómetro + Giroscopio):**
+  * Comunicación: I²C (Addr: 0x68).
+  * Grados de libertad: 6 (3 ejes aceleración, 3 ejes rotación).
+  * *Función:* Detectar colisiones mediante picos de aceleración negativa y estimar velocidad.
+* **HC-SR04 (Ultrasonido):**
+  * Rango de detección: 2 cm a 400 cm.
+  * Ángulo de apertura: 15°.
+  * *Función:* Detección de obstáculos para el sistema de frenado automático.
+
+## 1.4 Diseño del PCB/tarjeta perforada
+
+Se optó por la implementación en **placa perforada (protoboard soldable)** para garantizar robustez mecánica y reparabilidad durante las pruebas de campo.
+
+![Implementación del circuito en placa perforada](imgs/circuito_implementado.jpg)
+
+**Detalles de implementación:**
+1. **Soldadura:** Se eliminan los falsos contactos típicos de las breadboards, asegurando la fiabilidad ante vibraciones.
+2. **Ruteo de potencia:** Se utilizaron líneas de estaño reforzadas para soportar la corriente de los motores sin caídas de tensión significativas.
+3. **Modularidad:** El ESP32 se monta sobre zócalos (headers) hembra para facilitar su reemplazo o reprogramación fuera del circuito.
+
+## 1.5 Análisis de consumo energético
+
+El sistema es alimentado por **dos baterías de 9V** independientes (una para lógica, otra para potencia) para evitar ruido eléctrico, aunque el análisis se realiza sobre la carga total para dimensionamiento.
+
+**Cálculo de corriente total ($I_{total}$):**
+
+$$I_{total} = I_{ESP32} + I_{Motores} + I_{Sensores}$$
+
+* $I_{ESP32}$ (WiFi TX pico): ~240 mA.
+* $I_{Motores}$ (Carga nominal x2): ~500 mA.
+* $I_{Sensores}$ (MPU + HC-SR04): ~20 mA.
+
+$$I_{total} \approx 760 \text{ mA}$$
+
+**Autonomía Estimada:**
+Usando baterías alcalinas estándar (~550 mAh):
+
+$$Tiempo \approx \frac{550 \text{ mAh}}{760 \text{ mA}} \times 0.7 (\text{eficiencia}) \approx 0.5 \text{ horas}$$
+
+## 1.6 Consideraciones de diseño mecánico
+
+1. **Distribución de peso:** La placa electrónica y las baterías se ubican en el centro del chasis para mantener el centro de gravedad bajo y evitar vuelcos en giros rápidos.
+2. **Acople de motores:** Los motores TT se acoplan directamente a las ruedas con neumáticos de goma para maximizar la tracción.
+3. **Ubicación de sensores:** El sensor ultrasónico HC-SR04 se monta en la parte frontal, libre de obstrucciones, para asegurar una lectura limpia del camino. La IMU (MPU6050) se fija solidaria al chasis para leer fielmente las aceleraciones del vehículo.
 ## 2. Arquitectura del software embebido
 
 ### 2.1 Módulos
@@ -200,14 +291,11 @@ Esto permite al usuario sacar el vehículo de situaciones de bloqueo, asumiendo 
 
 #### 2.4.1 Pila de protocolos
 
-- **Capa física/enlace:**  
-  WiFi (IEEE 802.11, manejado por el stack del ESP32).
+- **Capa física/enlace:** WiFi (IEEE 802.11, manejado por el stack del ESP32).
 
-- **Capa de transporte:**  
-  TCP (conexión orientada, fiable).
+- **Capa de transporte:** TCP (conexión orientada, fiable).
 
-- **Capa de aplicación:**  
-  Protocolo propio basado en líneas de texto ASCII.
+- **Capa de aplicación:** Protocolo propio basado en líneas de texto ASCII.
 
 
 #### 2.4.2 Protocolo de aplicación (definido en el código)
@@ -298,6 +386,8 @@ En el entorno **ESP32 con Arduino**, la memoria de programa y de datos se organi
 
 El diseño evita el uso explícito de memoria dinámica por parte del usuario (no hay `new` / `malloc` en el código), lo cual simplifica el análisis de consumo de memoria y reduce el riesgo de fragmentación.
 
+---
+
 ## 3. Aplicación de usuario y comunicación
 
 ### 3.1 Rol de la aplicación de usuario
@@ -311,8 +401,6 @@ La aplicación de usuario es una **aplicación de escritorio en Python** que act
 - Generar **alertas remotas** (por SMS vía Twilio) cuando se detectan colisiones.
 
 Desde el punto de vista del sistema completo, la aplicación Python cumple el rol de **interfaz de usuario externa** y de **terminal de monitoreo**, conectándose al ESP32 mediante WiFi + TCP usando un protocolo de texto sencillo.
-
----
 
 ### 3.2 Arquitectura de la aplicación
 
@@ -391,12 +479,6 @@ En conjunto, la arquitectura sigue un esquema cercano a **Modelo–Vista–Contr
 - **Vista**: `ControlGUI`.
 - **Modelo / Servicios**: `ESP32Communication`, `CommunicationMonitor`, `TwilioNotifier` y la configuración en `config.py`.
 
----
-
-### 3.3 Interfaz de usuario
-
-La interfaz gráfica, implementada en Tkinter, se diseñó para que el control sea **intuitivo y rápido**, enfocado en la operación del carrito en tiempo real.
-
 ### 3.3 Interfaz de usuario
 
 La interfaz gráfica, implementada en Tkinter, se diseñó para que el control sea **intuitivo y rápido**, enfocado en la operación del carrito en tiempo real.
@@ -452,8 +534,6 @@ Las principales áreas de la GUI son:
      - Logs descargados desde el robot (por ejemplo: "DETENCION! Obstaculo a 24.5cm").
    - La aplicación también guarda un archivo local `esp32_logs.json` para análisis posterior.
 
----
-
 ### 3.4 Protocolo de comunicación robot–aplicación
 
 La comunicación entre la aplicación de usuario y el robot se basa en la pila:
@@ -480,20 +560,17 @@ Desde el punto de vista de la aplicación Python:
 
 Los comandos se envían como cadenas de texto, por ejemplo:
 
-- **Movimiento**  
-  - `FORWARD`  
+- **Movimiento** - `FORWARD`  
   - `BACKWARD`  
   - `LEFT`  
   - `RIGHT`  
   - `STOP`  
 
-- **Velocidad**  
-  - `SPEED_LOW` (PWM bajo predefinido).  
+- **Velocidad** - `SPEED_LOW` (PWM bajo predefinido).  
   - `SPEED_HIGH` (PWM alto predefinido).  
   - `SPEED_SET:<0-255>` para establecer un valor PWM exacto, usado al presionar “+”/“-” de velocidad.
 
-- **Telemetría y logs**  
-  - `GET_SPEED` para solicitar la velocidad actual.  
+- **Telemetría y logs** - `GET_SPEED` para solicitar la velocidad actual.  
   - `GET_LOGS` para obtener los últimos logs generados por el ESP32 en formato JSON.
 
 El módulo `ESP32Communication` se encarga de:
@@ -506,20 +583,17 @@ El módulo `ESP32Communication` se encarga de:
 
 El hilo `_listen_for_messages()` procesa las respuestas del ESP32:
 
-- **Velocidad real**  
-  - Mensajes del tipo `SPEED:<valor>`:
+- **Velocidad real** - Mensajes del tipo `SPEED:<valor>`:
     - El valor se convierte a `float` y se pasa a `CarController._handle_speed_update()`.
     - La GUI actualiza el indicador de velocidad real en cm/s.
 
-- **Alertas de colisión**  
-  - Mensajes que contienen las palabras `COLISION` o `COLLISION`:
+- **Alertas de colisión** - Mensajes que contienen las palabras `COLISION` o `COLLISION`:
     - Activan el callback de colisión en el controlador (`_handle_collision_alert()`), que:
       - Envía inmediatamente `STOP`.
       - Registra el evento en el log visual.
       - Intenta enviar un SMS de alerta mediante Twilio.
 
-- **Logs del ESP32**  
-  - Mensajes que empiezan con `LOGS:` seguidos de un JSON con un arreglo de cadenas:
+- **Logs del ESP32** - Mensajes que empiezan con `LOGS:` seguidos de un JSON con un arreglo de cadenas:
     - Se decodifica el JSON.
     - Se actualiza un buffer circular de logs en `ESP32Communication`.
     - Se llama al callback `log_callback`, que:
@@ -527,10 +601,7 @@ El hilo `_listen_for_messages()` procesa las respuestas del ESP32:
       - Guarda el contenido en `esp32_logs.json`.
       - Muestra los mensajes en la GUI.
 
-- **Otros mensajes de respuesta**  
-  - Confirmaciones como `OK:FORWARD`, `OK:BACKWARD`, etc., que se registran en el monitor para calcular latencia y confiabilidad.
-
----
+- **Otros mensajes de respuesta** - Confirmaciones como `OK:FORWARD`, `OK:BACKWARD`, etc., que se registran en el monitor para calcular latencia y confiabilidad.
 
 ### 3.5 Funcionalidades de control y monitoreo
 
@@ -577,5 +648,3 @@ Además, si la lógica de firmware genera mensajes de colisión que son detectad
 3. **Intenta enviar un SMS** a un número preconfigurado mediante `TwilioNotifier`, siempre respetando el tiempo de *cooldown* configurado para evitar múltiples mensajes en muy poco tiempo.
 
 De este modo, la aplicación de usuario no solo proporciona **control interactivo**, sino también un nivel adicional de **supervisión y seguridad remota**, cerrando el ciclo de comunicación robot–usuario requerido por el proyecto.
-
-
