@@ -74,9 +74,9 @@ const float GRAVITY = 980.0;  // cm/s
 // -------------------------
 // SISTEMA DE DETECCIÓN DE OBSTÁCULOS
 // -------------------------
-const float DISTANCIA_INICIO_FRENADO = 120.0;  // cm - Inicia desaceleración
-const float DISTANCIA_DETENCION = 25.0;        // cm - Debe estar detenido
-const float DISTANCIA_REVERSA = 20.0;          // cm - Activa reversa
+const float DISTANCIA_INICIO_FRENADO = 90.0;  // cm - Inicia desaceleración
+const float DISTANCIA_DETENCION = 45.0;        // cm - Debe estar detenido
+const float DISTANCIA_REVERSA = 40.0;          // cm - Activa reversa
 const int VELOCIDAD_REVERSA = 255;             // PWM para reversa
 
 bool modoFrenadoAutomatico = false;  // Indica si está frenando automáticamente
@@ -121,7 +121,7 @@ String getLogsAsJSON() {
 }
 
 // =========================
-// FUNCIONES DE MOTORES - Optimizado con registros
+// FUNCIONES DE MOTORES
 // =========================
 void aplicarVelocidad() {
   ledcWrite(ENA, velocidad);  // ENA - Motor de tracción
@@ -129,12 +129,16 @@ void aplicarVelocidad() {
 }
 
 void detener() {
-  // Usando registros directos para máxima velocidad
+  // Usando registros directos
   GPIO.out_w1tc = IN1_MASK | IN2_MASK | IN3_MASK | IN4_MASK;  // Clear bits (LOW)
   moviendoAdelante = false;
   moviendoAtras = false;
   girandoDerecha = false;
   girandoIzquierda = false;
+  
+  // Resetear velocidad calculada del acelerómetro
+  velocidadActual = 0;
+  velocidadAnterior = 0;
 }
 
 void retrocederAutomatico() {
@@ -158,9 +162,12 @@ void avanzar() {
 
 void retroceder() {
   // Retroceder SIEMPRE obedece el comando del usuario
-  // Cancela cualquier modo automático activo
+  // Cancela cualquier modo automático activo INMEDIATAMENTE
   modoFrenadoAutomatico = false;
   modoReversaAutomatica = false;
+  
+  // Restaurar velocidad deseada para que el sistema no la resetee
+  velocidad = velocidadDeseada;
   
   // Usando registros directos
   GPIO.out_w1tc = IN1_MASK;  // Clear IN1
@@ -206,14 +213,16 @@ void IRAM_ATTR echo_ISR() {
 
 float medirDistancia() {
   pulseDone = false;
+  
   digitalWrite(TRIG_PIN, LOW);
-  delayMicroseconds(5);
+  delayMicroseconds(2);
   digitalWrite(TRIG_PIN, HIGH);
   delayMicroseconds(10);
   digitalWrite(TRIG_PIN, LOW);
 
+  // Timeout de 30ms (suficiente para 5m de alcance, menos consumo)
   unsigned long timeout = millis();
-  while (!pulseDone && millis() - timeout < 50) {}
+  while (!pulseDone && millis() - timeout < 30) {}
 
   if (!pulseDone) return -1;
 
@@ -225,32 +234,42 @@ float medirDistancia() {
 // CÁLCULO DE VELOCIDAD MPU6050
 // =========================
 void calcularVelocidad() {
-  int16_t ax, ay, az;
-  mpu.getAcceleration(&ax, &ay, &az);
-  
+  // Solo calcular si ha pasado suficiente tiempo (reduce lecturas I2C)
   unsigned long tiempoActual = millis();
   float deltaT = (tiempoActual - tiempoAnterior) / 1000.0;
+  
+  if (deltaT < 0.05) return;  // Mínimo 50ms entre lecturas (ahorro I2C)
+  
+  int16_t ax, ay, az;
+  mpu.getAcceleration(&ax, &ay, &az);
   
   if (deltaT > 0 && deltaT < 1.0) {
     float accelX = (ax / ACCEL_SCALE) * GRAVITY;
     float accelY = (ay / ACCEL_SCALE) * GRAVITY;
     float accelMagnitud = sqrt(accelX * accelX + accelY * accelY);
     
-    if (abs(accelMagnitud) < 50.0) {
+    // Filtro de ruido más agresivo - ignorar aceleraciones muy pequeñas
+    if (abs(accelMagnitud) < 80.0) {
       accelMagnitud = 0;
     }
     
-    velocidadActual = velocidadAnterior + (accelMagnitud * deltaT);
-    velocidadActual *= 0.95;
-    
-    if (velocidad < 50) {
-      velocidadActual *= 0.7;
+    // Si el carro está detenido (velocidad PWM = 0), resetear velocidad calculada
+    if (velocidad == 0) {
+      velocidadActual = 0;
+      velocidadAnterior = 0;
+    } else {
+      velocidadActual = velocidadAnterior + (accelMagnitud * deltaT);
+      velocidadActual *= 0.90;  // Decay más agresivo (era 0.95)
+      
+      if (velocidad < 50) {
+        velocidadActual *= 0.5;  // Reducción más agresiva a baja velocidad (era 0.7)
+      }
+      
+      if (velocidadActual < 0) velocidadActual = 0;
+      if (velocidadActual > 200) velocidadActual = 200;
+      
+      velocidadAnterior = velocidadActual;
     }
-    
-    if (velocidadActual < 0) velocidadActual = 0;
-    if (velocidadActual > 200) velocidadActual = 200;
-    
-    velocidadAnterior = velocidadActual;
   }
   
   tiempoAnterior = tiempoActual;
@@ -264,6 +283,12 @@ void verificarSensoresSeguridad() {
   float d = medirDistancia();
   
   if (d > 0) {
+    // NO aplicar lógica de seguridad si el usuario está retrocediendo manualmente
+    if (moviendoAtras) {
+      // Usuario tiene control manual, no interferir
+      return;
+    }
+    
     if (d < DISTANCIA_REVERSA) {
       if (!modoReversaAutomatica) {
         addLog("EMERGENCIA! Reversa automatica a " + String(d, 1) + "cm");
@@ -295,6 +320,7 @@ void verificarSensoresSeguridad() {
       aplicarVelocidad();
     }
     else {
+      // Zona segura - SIEMPRE restaurar control si estaba en modo automático
       if (modoFrenadoAutomatico || modoReversaAutomatica) {
         addLog("Zona segura. Control normal restaurado");
         modoFrenadoAutomatico = false;
@@ -302,6 +328,20 @@ void verificarSensoresSeguridad() {
         velocidad = velocidadDeseada;
         aplicarVelocidad();
       }
+    }
+  }
+  // Si no hay lectura válida pero estaba en modo automático, seguir verificando
+  else if (modoFrenadoAutomatico || modoReversaAutomatica) {
+    // Después de 2 segundos sin lectura, restaurar control
+    static unsigned long lastValidReading = 0;
+    if (lastValidReading == 0) lastValidReading = millis();
+    
+    if (millis() - lastValidReading > 2000) {
+      addLog("Sin lectura de sensor - restaurando control");
+      modoFrenadoAutomatico = false;
+      modoReversaAutomatica = false;
+      velocidad = velocidadDeseada;
+      lastValidReading = 0;
     }
   }
 }
@@ -318,8 +358,12 @@ void setup() {
   pinMode(IN3, OUTPUT);
   pinMode(IN4, OUTPUT);
 
-  ledcAttach(ENA, 5000, 8);
-  ledcAttach(ENB, 5000, 8);
+  // PWM a 1kHz
+  ledcAttach(ENA, 1000, 8);
+  ledcAttach(ENB, 1000, 8);
+  
+  // Reducir frecuencia del CPU para ahorro de energía
+  setCpuFrequencyMhz(80); 
   aplicarVelocidad();
   detener();
 
@@ -332,8 +376,13 @@ void setup() {
   tiempoAnterior = millis();
 
   Serial.println("\n--- Configurando WiFi ---");
-  // Configurar ESP32 como Access Point
+  // Configurar ESP32 como Access Point con ahorro de energía
   WiFi.mode(WIFI_AP);
+  
+  // Reducir potencia de transmisión WiFi (ahorro de energía)
+  // Rango: 0-20 (0=mínimo, 20=máximo). Usar 8 para balance ahorro/alcance
+  WiFi.setTxPower(WIFI_POWER_8_5dBm);  // ~34mA en lugar de ~120mA
+  
   WiFi.softAP(ssid, password);
   
   IPAddress IP = WiFi.softAPIP();
@@ -358,12 +407,9 @@ void setup() {
   Serial.println("Sistema iniciado");
 }
 
-// =========================
-// LOOP PRINCIPAL
-// =========================
+
 void loop() {
-  // Verificar sensores cada 50ms
-  if (millis() - lastSensorCheck >= 50) {
+  if (millis() - lastSensorCheck >= 100) {
     verificarSensoresSeguridad();
     lastSensorCheck = millis();
   }
@@ -375,14 +421,14 @@ void loop() {
     lastSpeedUpdate = millis();
     
     while (client.connected()) {
-      // Verificar sensores durante la conexión
-      if (millis() - lastSensorCheck >= 50) {
+      // Verificar sensores cada 100ms durante conexión
+      if (millis() - lastSensorCheck >= 100) {
         verificarSensoresSeguridad();
         lastSensorCheck = millis();
       }
       
-      // Enviar velocidad cada 500ms
-      if (millis() - lastSpeedUpdate >= 500) {
+      // Enviar velocidad cada 1000ms (1 seg) para reducir tráfico WiFi
+      if (millis() - lastSpeedUpdate >= 1000) {
         client.println("SPEED:" + String(velocidadActual, 2));
         lastSpeedUpdate = millis();
       }
@@ -463,10 +509,14 @@ void loop() {
         }
       }
       
-      delay(5);
+      // Delay de 10ms para reducir consumo CPU (suficiente para respuesta rápida)
+      delay(10);
     }
     
     client.stop();
     addLog("Cliente desconectado");
   }
+  
+  // Pequeño delay para reducir consumo CPU en loop vacío
+  delay(5);
 }
