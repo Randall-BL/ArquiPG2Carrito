@@ -3,8 +3,8 @@ Configuración del sistema de control remoto
 """
 
 # Configuración de red
-ESP32_IP = "192.168.50.190"  # IP del ESP32 (por defecto en modo AP)
-ESP32_PORT = 9000  # Puerto del servidor en el ESP32
+ESP32_IP = "192.168.4.1"  # IP del ESP32 (por defecto en modo AP)
+ESP32_PORT = 80  # Puerto del servidor en el ESP32
 
 # Configuración de la interfaz
 WINDOW_TITLE = "Control Remoto - Carrito ESP32"

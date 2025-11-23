@@ -3,6 +3,9 @@ Módulo controlador principal que coordina la GUI y la comunicación
 """
 
 import config
+import json
+import os
+from datetime import datetime
 from communication import ESP32Communication
 from gui import ControlGUI
 from monitoring import CommunicationMonitor
@@ -12,12 +15,15 @@ from notifications import TwilioNotifier
 class CarController:
     """Controlador principal del sistema de control remoto"""
     
+    LOG_FILE = "esp32_logs.json"  # Archivo donde se guardan los logs
+    
     def __init__(self):
         self.monitor = CommunicationMonitor()
         self.comm = ESP32Communication(
             monitor=self.monitor, 
             collision_callback=self._handle_collision_alert,
-            speed_callback=self._handle_speed_update
+            speed_callback=self._handle_speed_update,
+            log_callback=self._handle_esp32_logs
         )
         self.notifier = TwilioNotifier()  # Sistema de notificaciones
         self.gui = ControlGUI(
@@ -28,6 +34,10 @@ class CarController:
         )
         self.current_pwm = config.SPEED_LOW  # PWM que se envía al ESP32 (0-255)
         self.current_speed_real = 0.0  # Velocidad real medida por MPU6050 (cm/s)
+        self.esp32_logs_buffer = []  # Buffer local de logs del ESP32
+        
+        # Cargar logs existentes si hay
+        self._load_logs_from_file()
         
         # Actualizar displays iniciales
         self.gui.update_pwm_display(self.current_pwm)
@@ -35,6 +45,7 @@ class CarController:
         
         # Iniciar actualización periódica de estadísticas
         self._schedule_stats_update()
+        self._schedule_log_request()
         
     def handle_direction(self, command: str):
         """
@@ -178,6 +189,58 @@ class CarController:
             self.gui.update_speed_display(self.current_speed_real)
         except (ValueError, TypeError) as e:
             print(f"Error al procesar velocidad: {e}")
+    
+    def _handle_esp32_logs(self, logs: list):
+        """Maneja los logs recibidos del ESP32"""
+        # Actualizar buffer local (mantener solo los últimos 10)
+        self.esp32_logs_buffer = logs[-10:] if len(logs) > 10 else logs
+        
+        # Guardar en archivo
+        self._save_logs_to_file()
+        
+        # Mostrar en GUI
+        self.gui.add_log_message("--- Logs ESP32 ---")
+        for log in self.esp32_logs_buffer:
+            self.gui.add_log_message(f"🔧 {log}")
+        self.gui.add_log_message("------------------")
+    
+    def _save_logs_to_file(self):
+        """Guarda los logs en un archivo JSON"""
+        try:
+            log_data = {
+                "timestamp": datetime.now().isoformat(),
+                "logs": self.esp32_logs_buffer,
+                "total_logs": len(self.esp32_logs_buffer)
+            }
+            
+            with open(self.LOG_FILE, 'w', encoding='utf-8') as f:
+                json.dump(log_data, f, indent=2, ensure_ascii=False)
+            
+            print(f"✓ Logs guardados en {self.LOG_FILE}")
+        except Exception as e:
+            print(f"✗ Error al guardar logs: {e}")
+    
+    def _load_logs_from_file(self):
+        """Carga los logs desde el archivo si existe"""
+        try:
+            if os.path.exists(self.LOG_FILE):
+                with open(self.LOG_FILE, 'r', encoding='utf-8') as f:
+                    log_data = json.load(f)
+                    self.esp32_logs_buffer = log_data.get("logs", [])
+                    print(f"✓ Cargados {len(self.esp32_logs_buffer)} logs desde {self.LOG_FILE}")
+            else:
+                print(f"ℹ No se encontró archivo de logs previo")
+        except Exception as e:
+            print(f"✗ Error al cargar logs: {e}")
+            self.esp32_logs_buffer = []
+    
+    def _schedule_log_request(self):
+        """Programa la solicitud periódica de logs del ESP32"""
+        if not self.gui.is_closed:
+            if self.comm.is_connected():
+                self.comm.request_logs()
+            # Reprogramar para la próxima solicitud (cada 5 segundos)
+            self.gui.root.after(5000, self._schedule_log_request)
         
     def run(self):
         """Inicia la aplicación"""
@@ -185,6 +248,7 @@ class CarController:
         print("Control Remoto para Carrito ESP32")
         print("=" * 50)
         print(f"IP del ESP32: {config.ESP32_IP}:{config.ESP32_PORT}")
+        print(f"Archivo de logs: {self.LOG_FILE}")
         print("\nInstrucciones:")
         print("1. Conecta tu PC a la red WiFi del ESP32")
         print("2. Haz clic en 'Conectar'")
@@ -194,5 +258,8 @@ class CarController:
         try:
             self.gui.run()
         finally:
+            # Guardar logs finales antes de cerrar
+            if self.esp32_logs_buffer:
+                self._save_logs_to_file()
             self.handle_disconnect()
             print("\n¡Hasta luego!")

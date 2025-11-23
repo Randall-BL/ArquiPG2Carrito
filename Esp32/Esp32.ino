@@ -1,17 +1,29 @@
 #include <WiFi.h>
 #include <Wire.h>
 #include <WiFiClient.h>
+#include <WiFiAP.h>
 #include "MPU6050.h"
+#include "driver/gpio.h"
+#include "soc/gpio_reg.h"
+#include "soc/gpio_struct.h"
 
 // -------------------------
 // WIFI
 // -------------------------
-const char* ssid = "xxxxx";
-const char* password = "xxxxx";
-WiFiServer server(9000);
+const char* ssid = "ESP32_Carrito";        // Nombre de la red WiFi
+const char* password = "12345678";         // Contraseña (mínimo 8 caracteres)
+WiFiServer server(80);
 
 // -------------------------
-// MOTORES (L298N)
+// SISTEMA DE LOGS
+// -------------------------
+#define MAX_LOGS 10
+String logBuffer[MAX_LOGS];
+int logIndex = 0;
+int logCount = 0;
+
+// -------------------------
+// MOTORES (L298N) - Optimizado con registros
 // -------------------------
 #define IN1 25
 #define IN2 26
@@ -20,6 +32,12 @@ WiFiServer server(9000);
 
 #define ENA 32   // PWM Motor A (Tracción)
 #define ENB 33   // PWM Motor B (Dirección)
+
+// Máscaras de bits para acceso directo a registros
+#define IN1_MASK (1ULL << IN1)
+#define IN2_MASK (1ULL << IN2)
+#define IN3_MASK (1ULL << IN3)
+#define IN4_MASK (1ULL << IN4)
 
 int velocidad = 200;   // valor inicial PWM (0-255)
 
@@ -73,7 +91,37 @@ unsigned long lastSensorCheck = 0;
 unsigned long lastSpeedUpdate = 0;
 
 // =========================
-// FUNCIONES DE MOTORES
+// FUNCIONES DE LOGS
+// =========================
+void addLog(const String& message) {
+  // Agregar timestamp
+  String logMsg = "[" + String(millis()/1000) + "s] " + message;
+  
+  // Agregar al buffer circular
+  logBuffer[logIndex] = logMsg;
+  logIndex = (logIndex + 1) % MAX_LOGS;
+  if (logCount < MAX_LOGS) logCount++;
+  
+  // También imprimir en Serial
+  Serial.println(logMsg);
+}
+
+String getLogsAsJSON() {
+  String json = "{\"logs\":[";
+  
+  int start = (logCount < MAX_LOGS) ? 0 : logIndex;
+  for (int i = 0; i < logCount; i++) {
+    int idx = (start + i) % MAX_LOGS;
+    if (i > 0) json += ",";
+    json += "\"" + logBuffer[idx] + "\"";
+  }
+  
+  json += "]}";
+  return json;
+}
+
+// =========================
+// FUNCIONES DE MOTORES - Optimizado con registros
 // =========================
 void aplicarVelocidad() {
   ledcWrite(ENA, velocidad);  // ENA - Motor de tracción
@@ -81,10 +129,8 @@ void aplicarVelocidad() {
 }
 
 void detener() {
-  digitalWrite(IN1, LOW);
-  digitalWrite(IN2, LOW);
-  digitalWrite(IN3, LOW);
-  digitalWrite(IN4, LOW);
+  // Usando registros directos para máxima velocidad
+  GPIO.out_w1tc = IN1_MASK | IN2_MASK | IN3_MASK | IN4_MASK;  // Clear bits (LOW)
   moviendoAdelante = false;
   moviendoAtras = false;
   girandoDerecha = false;
@@ -92,18 +138,18 @@ void detener() {
 }
 
 void retrocederAutomatico() {
-  digitalWrite(IN1, LOW);
-  digitalWrite(IN2, HIGH);
-  digitalWrite(IN3, LOW);
-  digitalWrite(IN4, LOW);
+  // Usando registros directos
+  GPIO.out_w1tc = IN1_MASK | IN3_MASK | IN4_MASK;  // Clear IN1, IN3, IN4
+  GPIO.out_w1ts = IN2_MASK;                        // Set IN2
   ledcWrite(ENA, VELOCIDAD_REVERSA);
   ledcWrite(ENB, 255);
 }
 
 void avanzar() {
   if (!modoFrenadoAutomatico && !modoReversaAutomatica) {
-    digitalWrite(IN1, HIGH);
-    digitalWrite(IN2, LOW);
+    // Usando registros directos
+    GPIO.out_w1tc = IN2_MASK;  // Clear IN2
+    GPIO.out_w1ts = IN1_MASK;  // Set IN1
     moviendoAdelante = true;
     moviendoAtras = false;
     aplicarVelocidad();
@@ -116,8 +162,9 @@ void retroceder() {
   modoFrenadoAutomatico = false;
   modoReversaAutomatica = false;
   
-  digitalWrite(IN1, LOW);
-  digitalWrite(IN2, HIGH);
+  // Usando registros directos
+  GPIO.out_w1tc = IN1_MASK;  // Clear IN1
+  GPIO.out_w1ts = IN2_MASK;  // Set IN2
   moviendoAdelante = false;
   moviendoAtras = true;
   aplicarVelocidad();
@@ -125,8 +172,9 @@ void retroceder() {
 
 void girarDerecha() {
   if (!modoFrenadoAutomatico && !modoReversaAutomatica) {
-    digitalWrite(IN3, HIGH);
-    digitalWrite(IN4, LOW);
+    // Usando registros directos
+    GPIO.out_w1tc = IN4_MASK;  // Clear IN4
+    GPIO.out_w1ts = IN3_MASK;  // Set IN3
     girandoDerecha = true;
     girandoIzquierda = false;
     aplicarVelocidad();
@@ -135,8 +183,9 @@ void girarDerecha() {
 
 void girarIzquierda() {
   if (!modoFrenadoAutomatico && !modoReversaAutomatica) {
-    digitalWrite(IN3, LOW);
-    digitalWrite(IN4, HIGH);
+    // Usando registros directos
+    GPIO.out_w1tc = IN3_MASK;  // Clear IN3
+    GPIO.out_w1ts = IN4_MASK;  // Set IN4
     girandoDerecha = false;
     girandoIzquierda = true;
     aplicarVelocidad();
@@ -217,7 +266,7 @@ void verificarSensoresSeguridad() {
   if (d > 0) {
     if (d < DISTANCIA_REVERSA) {
       if (!modoReversaAutomatica) {
-        Serial.println("EMERGENCIA! Reversa automatica a " + String(d) + " cm");
+        addLog("EMERGENCIA! Reversa automatica a " + String(d, 1) + "cm");
         modoReversaAutomatica = true;
         modoFrenadoAutomatico = false;
       }
@@ -225,7 +274,7 @@ void verificarSensoresSeguridad() {
     }
     else if (d < DISTANCIA_DETENCION) {
       if (!modoFrenadoAutomatico || velocidad > 0) {
-        Serial.println("DETENCION! Obstaculo a " + String(d) + " cm");
+        addLog("DETENCION! Obstaculo a " + String(d, 1) + "cm");
         modoFrenadoAutomatico = true;
         modoReversaAutomatica = false;
         velocidad = 0;
@@ -234,7 +283,7 @@ void verificarSensoresSeguridad() {
     }
     else if (d < DISTANCIA_INICIO_FRENADO) {
       if (!modoFrenadoAutomatico) {
-        Serial.println("Iniciando frenado gradual a " + String(d) + " cm");
+        addLog("Frenado gradual iniciado a " + String(d, 1) + "cm");
         velocidadOriginal = velocidadDeseada;
         modoFrenadoAutomatico = true;
       }
@@ -247,7 +296,7 @@ void verificarSensoresSeguridad() {
     }
     else {
       if (modoFrenadoAutomatico || modoReversaAutomatica) {
-        Serial.println("Zona segura. Restaurando control normal.");
+        addLog("Zona segura. Control normal restaurado");
         modoFrenadoAutomatico = false;
         modoReversaAutomatica = false;
         velocidad = velocidadDeseada;
@@ -282,19 +331,30 @@ void setup() {
   mpu.initialize();
   tiempoAnterior = millis();
 
-  WiFi.begin(ssid, password);
-  Serial.print("Conectando WiFi");
-  while (WiFi.status() != WL_CONNECTED) { 
-    delay(300); 
-    Serial.print("."); 
-  }
-  Serial.println("\nWiFi conectado");
-  Serial.println("IP: " + WiFi.localIP().toString());
+  Serial.println("\n--- Configurando WiFi ---");
+  // Configurar ESP32 como Access Point
+  WiFi.mode(WIFI_AP);
+  WiFi.softAP(ssid, password);
+  
+  IPAddress IP = WiFi.softAPIP();
+  
+  Serial.print("✓ Access Point creado: ");
+  Serial.println(ssid);
+  Serial.print("✓ Contraseña: ");
+  Serial.println(password);
+  Serial.print("✓ Dirección IP: ");
+  Serial.println(IP);
+  
+  // Iniciar servidor
   server.begin();
+  Serial.println("✓ Servidor iniciado en puerto 80");
+
+
 
   lastSensorCheck = millis();
   lastSpeedUpdate = millis();
 
+  addLog("Sistema iniciado correctamente");
   Serial.println("Sistema iniciado");
 }
 
@@ -311,7 +371,7 @@ void loop() {
   // Manejar cliente WiFi
   WiFiClient client = server.available();
   if (client) {
-    Serial.println("Cliente conectado");
+    addLog("Cliente conectado");
     lastSpeedUpdate = millis();
     
     while (client.connected()) {
@@ -331,7 +391,6 @@ void loop() {
       if (client.available()) {
         String comando = client.readStringUntil('\n');
         comando.trim();
-        Serial.println("Recibido: " + comando);
         
         if (comando.startsWith("SPEED_SET:")) {
           int newSpeed = comando.substring(10).toInt();
@@ -340,7 +399,7 @@ void loop() {
             if (!modoFrenadoAutomatico && !modoReversaAutomatica) {
               velocidad = newSpeed;
               aplicarVelocidad();
-              Serial.println("Velocidad PWM = " + String(velocidad));
+              addLog("Velocidad PWM=" + String(velocidad));
             }
             client.println("SPEED:" + String(velocidadActual, 2));
           }
@@ -351,6 +410,7 @@ void loop() {
             velocidad = 150;
             aplicarVelocidad();
           }
+          addLog("Velocidad BAJA");
           client.println("SPEED:" + String(velocidadActual, 2));
         }
         else if (comando == "SPEED_HIGH") {
@@ -359,42 +419,47 @@ void loop() {
             velocidad = 255;
             aplicarVelocidad();
           }
+          addLog("Velocidad ALTA");
           client.println("SPEED:" + String(velocidadActual, 2));
         }
         else if (comando == "FORWARD") {
           if (!modoFrenadoAutomatico && !modoReversaAutomatica) {
             avanzar();
-            Serial.println("CMD: FORWARD");
+            addLog("CMD: AVANZAR");
           }
           client.println("OK:FORWARD");
         }
         else if (comando == "BACKWARD") {
           // BACKWARD siempre se ejecuta, sin importar modos automáticos
           retroceder();
-          Serial.println("CMD: BACKWARD (forzado)");
+          addLog("CMD: RETROCEDER (forzado)");
           client.println("OK:BACKWARD");
         }
         else if (comando == "LEFT") {
           if (!modoFrenadoAutomatico && !modoReversaAutomatica) {
             girarIzquierda();
-            Serial.println("CMD: LEFT");
+            addLog("CMD: IZQUIERDA");
           }
           client.println("OK:LEFT");
         }
         else if (comando == "RIGHT") {
           if (!modoFrenadoAutomatico && !modoReversaAutomatica) {
             girarDerecha();
-            Serial.println("CMD: RIGHT");
+            addLog("CMD: DERECHA");
           }
           client.println("OK:RIGHT");
         }
         else if (comando == "STOP") {
           detener();
-          Serial.println("CMD: STOP");
+          addLog("CMD: DETENER");
           client.println("OK:STOP");
         }
         else if (comando == "GET_SPEED") {
           client.println("SPEED:" + String(velocidadActual, 2));
+        }
+        else if (comando == "GET_LOGS") {
+          // Enviar logs en formato JSON
+          client.println("LOGS:" + getLogsAsJSON());
         }
       }
       
@@ -402,6 +467,6 @@ void loop() {
     }
     
     client.stop();
-    Serial.println("Cliente desconectado");
+    addLog("Cliente desconectado");
   }
 }
