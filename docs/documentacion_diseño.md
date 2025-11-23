@@ -397,6 +397,14 @@ En conjunto, la arquitectura sigue un esquema cercano a **Modelo–Vista–Contr
 
 La interfaz gráfica, implementada en Tkinter, se diseñó para que el control sea **intuitivo y rápido**, enfocado en la operación del carrito en tiempo real.
 
+### 3.3 Interfaz de usuario
+
+La interfaz gráfica, implementada en Tkinter, se diseñó para que el control sea **intuitivo y rápido**, enfocado en la operación del carrito en tiempo real.
+
+![Interfaz gráfica de la aplicación de control remoto](imgs/gui.png)
+
+Vista general de la aplicación de escritorio desarrollada en Python/Tkinter para el control del carrito.
+
 Las principales áreas de la GUI son:
 
 1. **Panel de conexión**
@@ -406,20 +414,18 @@ Las principales áreas de la GUI son:
 
 2. **D-Pad de dirección**
    - Conjunto de botones:
-     - ▲ Adelante (`FORWARD`)
-     - ▼ Atrás (`BACKWARD`)
-     - ◄ Izquierda (`LEFT`)
-     - ► Derecha (`RIGHT`)
-     - ■ Detener (`STOP`)
-   - Soporta **control por teclado**:
-     - Flechas del teclado para las direcciones.
-     - Barra espaciadora para detener.
+     - ▲ Adelante (`Palanca hacia arriba`)
+     - ▼ Atrás (`Palanca hacia abajo`)
+     - ◄ Izquierda (`IZQ`)
+     - ► Derecha (`DER`)
+     - ■ Detener (`FRENO`)
+
    - Cada pulsación se traduce en un comando que el controlador envía al ESP32.
 
 3. **Control de velocidad**
    - Botones para:
-     - **Velocidad baja** (🐌, comando `SPEED_LOW`).
-     - **Velocidad alta** (🚀, comando `SPEED_HIGH`).
+     - **Velocidad baja** (`SPEED_LOW`).
+     - **Velocidad alta** (`SPEED_HIGH`).
      - Aumentar y disminuir velocidad (`SPEED_UP`, `SPEED_DOWN`), que internamente se traducen en `SPEED_SET:<PWM>`.
    - Indicador numérico del **PWM actual** (`update_pwm_display()`).
    - La GUI refleja siempre el valor PWM que maneja el controlador (`current_pwm`).
