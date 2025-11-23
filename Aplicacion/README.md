@@ -119,14 +119,3 @@ Los comandos enviados al ESP32 son strings terminados en `\n`:
 2. Verifica que el ESP32 esté recibiendo los comandos
 3. Revisa los mensajes en la consola
 
-## 🔄 Extensiones Futuras
-
-- Agregar control de velocidad con slider
-- Implementar modo gamepad/joystick
-- Agregar telemetría del carrito
-- Implementar grabación y replay de trayectorias
-- Agregar vista de cámara en tiempo real
-
-## 👨‍💻 Autor
-
-Proyecto de control remoto para Arquitectura de Computadores

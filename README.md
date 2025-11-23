@@ -4,7 +4,7 @@ Sistema completo de control remoto inalámbrico para un carrito robótico usando
 
 ## 📋 Descripción del Proyecto
 
-El proyecto consiste en el desarrollo de un carrito controlado remotamente mediante una aplicación escrita en Python, comunicada por WiFi con un microcontrolador ESP32, el cual gestiona los motores, la lectura de sensores y la transmisión de telemetría. El sistema permite desplazar el vehículo en distintas direcciones bajo control del usuario y, de manera automática, detenerse antes de una colisión gracias a la integración de un sensor ultrasónico HC-SR04 (detección de distancia frontal) y un acelerómetro MPU-6050 (detección de impactos o desaceleraciones bruscas).
+El proyecto consiste en el desarrollo de un carrito controlado remotamente mediante una aplicación escrita en Python, comunicada por WiFi con un microcontrolador ESP32, el cual gestiona los motores, la lectura de sensores y la transmisión de telemetría. El sistema permite desplazar el vehículo en distintas direcciones bajo control del usuario y, de manera automática, detenerse antes de una colisión gracias a la integración de un sensor ultrasónico HC-SR04 (detección de distancia frontal) y un acelerómetro MPU-6050.
 
 Este diseño busca simular funciones de frenado autónomo y seguridad activa presentes en vehículos modernos, a la vez que fortalece el entendimiento de sistemas embebidos, control en tiempo real y comunicación inalámbrica.
 
@@ -12,7 +12,7 @@ Este diseño busca simular funciones de frenado autónomo y seguridad activa pre
 
 La propuesta es técnicamente viable utilizando componentes de bajo costo y alta disponibilidad, como el ESP32, sensores digitales y analógicos, motores DC con control H-Bridge y una interfaz de comunicación WiFi. El desarrollo implica tres áreas principales: control embebido, diseño de hardware y aplicación remota.
 
-El principal desafío técnico radica en la correcta sincronización entre la lectura de sensores en tiempo real, la ejecución de rutinas de control y la transmisión de datos hacia la aplicación Python sin generar latencias perceptibles. En términos de complejidad, el proyecto se considera de nivel medio-alto, al integrar hardware, software y comunicación inalámbrica de manera simultánea.
+El principal desafío técnico radica en la correcta sincronización entre la lectura de sensores en tiempo real, la ejecución de rutinas de control y la transmisión de datos hacia la aplicación Python sin generar latencias perceptibles y con bajo consumo energetico. En términos de complejidad, el proyecto se considera de nivel medio-alto, al integrar hardware, software y comunicación inalámbrica de manera simultánea.
 
 ## 📁 Estructura del Proyecto
 
@@ -28,7 +28,6 @@ ArquiPG2Carrito/
 │   ├── config.py           # Configuración
 │   ├── requirements.txt    # Dependencias
 │   ├── test_twilio.py      # Prueba de SMS
-│   ├── CONFIGURAR_TWILIO.md # Guía de Twilio
 │   └── README.md           # Documentación Python
 │
 ├── Esp32/                   # Código para ESP32
@@ -44,7 +43,7 @@ ArquiPG2Carrito/
 ### Aplicación Python
 - ✅ Interfaz gráfica intuitiva con Tkinter
 - ✅ D-Pad virtual para control de dirección
-- ✅ Control de velocidad (2 niveles)
+- ✅ Control de velocidad (multiples niveles)
 - ✅ Atajos de teclado
 - ✅ Comunicación WiFi TCP/IP
 - ✅ **Panel de monitoreo en tiempo real**
@@ -57,7 +56,7 @@ ArquiPG2Carrito/
 - ✅ Servidor TCP en puerto 80
 - ✅ Control PWM de motores
 - ✅ Soporte para puente H (L298N)
-- ✅ 2 niveles de velocidad
+- ✅ Multiples niveles de velocidad
 - ✅ **Sensor ultrasónico HC-SR04 (detección de distancia)**
 - ✅ **Acelerómetro MPU-6050 (detección de impactos)**
 - ✅ **Parada automática ante colisiones**
@@ -75,13 +74,11 @@ ArquiPG2Carrito/
 | **Sensor Ultrasónico HC-SR04** | 1 | Sensor de distancia | $2 - $4 USD |
 | **Acelerómetro MPU-6050** | 1 | Sensor IMU (acelerómetro + giroscopio) | $3 - $5 USD |
 | Cables Jumper | 40 piezas | Macho-macho | $1 - $2 USD |
-| Chasis de Carrito | 1 | Base de plástico/metal para carrito | $5 - $8 USD |
+| Chasis de Carrito | 1 | Base de plástico para carrito | $5 - $8 USD |
 | Ruedas | 2-4 | Ruedas según diseño (incluidas en chasis frecuentemente) | $3 - $6 USD |
 | Powerbank | 1 | 5V para ESP32 (opcional) | $10 - $15 USD |
-| **Resistencias** | 4 | 330Ω para LEDs | $0.50 USD |
-| **LEDs indicadores** | 2 | Rojo/Verde | $1 USD |
 | **Condensadores** | 2 | 100µF para filtrado | $1 USD |
-| ProtobBoard/Breadboard | 1 | Para conexiones | $2 - $4 USD |
+| Placa Perforada | 1 | Para conexiones | $2 - $4 USD |
 | **Costo Total Aproximado** | - | - | **$50 - $100 USD** |
 
 ## 📋 Requisitos de Software
