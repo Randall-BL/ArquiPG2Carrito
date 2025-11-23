@@ -2,6 +2,18 @@
 
 Sistema completo de control remoto inalámbrico para un carrito robótico usando ESP32 y Python.
 
+## 📋 Descripción del Proyecto
+
+El proyecto consiste en el desarrollo de un carrito controlado remotamente mediante una aplicación escrita en Python, comunicada por WiFi con un microcontrolador ESP32, el cual gestiona los motores, la lectura de sensores y la transmisión de telemetría. El sistema permite desplazar el vehículo en distintas direcciones bajo control del usuario y, de manera automática, detenerse antes de una colisión gracias a la integración de un sensor ultrasónico HC-SR04 (detección de distancia frontal) y un acelerómetro MPU-6050 (detección de impactos o desaceleraciones bruscas).
+
+Este diseño busca simular funciones de frenado autónomo y seguridad activa presentes en vehículos modernos, a la vez que fortalece el entendimiento de sistemas embebidos, control en tiempo real y comunicación inalámbrica.
+
+### Análisis de Viabilidad Técnica
+
+La propuesta es técnicamente viable utilizando componentes de bajo costo y alta disponibilidad, como el ESP32, sensores digitales y analógicos, motores DC con control H-Bridge y una interfaz de comunicación WiFi. El desarrollo implica tres áreas principales: control embebido, diseño de hardware y aplicación remota.
+
+El principal desafío técnico radica en la correcta sincronización entre la lectura de sensores en tiempo real, la ejecución de rutinas de control y la transmisión de datos hacia la aplicación Python sin generar latencias perceptibles. En términos de complejidad, el proyecto se considera de nivel medio-alto, al integrar hardware, software y comunicación inalámbrica de manera simultánea.
+
 ## 📁 Estructura del Proyecto
 
 ```
@@ -46,25 +58,31 @@ ArquiPG2Carrito/
 - ✅ Control PWM de motores
 - ✅ Soporte para puente H (L298N)
 - ✅ 2 niveles de velocidad
-- ✅ **Sensor de colisión (GPIO 34)**
+- ✅ **Sensor ultrasónico HC-SR04 (detección de distancia)**
+- ✅ **Acelerómetro MPU-6050 (detección de impactos)**
 - ✅ **Parada automática ante colisiones**
+- ✅ **Transmisión de telemetría**
 - ✅ Indicadores LED
 
 ## 🛠️ Hardware Necesario
 
-| Componente | Cantidad | Descripción |
-|------------|----------|-------------|
-| ESP32 | 1 | Cualquier modelo |
-| L298N | 1 | Puente H para motores |
-| Motores DC | 2 | 6-12V |
-| Batería | 1 | 6-12V para motores |
-| **Sensor de Colisión** | 1 | Táctil, bumper o HC-SR04 (opcional) |
-| Cables jumper | - | Para conexiones |
-| Chasis | 1 | Base del carrito |
-| Powerbank | 1 | 5V para ESP32 (opcional) |
-| Cables | varios | Jumpers macho-macho |
-| Chasis | 1 | Para el carrito |
-| Ruedas | 2-4 | Según diseño |
+| Componente | Cantidad | Descripción | Precio Estándar |
+|------------|----------|-------------|-----------------|
+| ESP32 | 1 | Microcontrolador WiFi | $8 - $12 USD |
+| L298N | 1 | Puente H para motores DC | $2 - $3 USD |
+| Motores DC | 2 | Motor 6-12V con eje | $3 - $5 USD c/u |
+| Batería | 1 | Batería 6-12V (LiPo o Pb-ácido) | $10 - $25 USD |
+| **Sensor Ultrasónico HC-SR04** | 1 | Sensor de distancia | $2 - $4 USD |
+| **Acelerómetro MPU-6050** | 1 | Sensor IMU (acelerómetro + giroscopio) | $3 - $5 USD |
+| Cables Jumper | 40 piezas | Macho-macho | $1 - $2 USD |
+| Chasis de Carrito | 1 | Base de plástico/metal para carrito | $5 - $8 USD |
+| Ruedas | 2-4 | Ruedas según diseño (incluidas en chasis frecuentemente) | $3 - $6 USD |
+| Powerbank | 1 | 5V para ESP32 (opcional) | $10 - $15 USD |
+| **Resistencias** | 4 | 330Ω para LEDs | $0.50 USD |
+| **LEDs indicadores** | 2 | Rojo/Verde | $1 USD |
+| **Condensadores** | 2 | 100µF para filtrado | $1 USD |
+| ProtobBoard/Breadboard | 1 | Para conexiones | $2 - $4 USD |
+| **Costo Total Aproximado** | - | - | **$50 - $100 USD** |
 
 ## 📋 Requisitos de Software
 
@@ -76,7 +94,7 @@ ArquiPG2Carrito/
 ### Para ESP32
 - Arduino IDE 1.8+ o 2.x
 - ESP32 Board Support
-- Ninguna biblioteca adicional
+- Ninguna biblioteca adicional requerida
 
 ## 🎯 Guía de Inicio Rápido
 
@@ -84,8 +102,10 @@ ArquiPG2Carrito/
 
 1. Conecta los motores al L298N
 2. Conecta el L298N al ESP32 según el diagrama
-3. Alimenta el ESP32 y los motores
-4. Sube el código al ESP32
+3. Conecta el sensor HC-SR04 al GPIO 35 (TRIG) y GPIO 32 (ECHO)
+4. Conecta el acelerómetro MPU-6050 vía I2C (GPIO 21 SDA, GPIO 22 SCL)
+5. Alimenta el ESP32 y los motores
+6. Sube el código al ESP32
 
 Ver [Esp32/README.md](Esp32/README.md) para detalles de conexión.
 
@@ -150,27 +170,13 @@ SPEED_LOW = 150   # PWM 0-255
 SPEED_HIGH = 255
 ```
 
-### 🚨 Configurar Notificaciones SMS (Opcional)
+### Configurar Distancia de Detección
 
-Para recibir alertas de colisión por SMS:
-
-1. **Crear cuenta en Twilio** (gratis, $15 USD crédito)
-   - https://www.twilio.com/try-twilio
-
-2. **Configurar credenciales** en `config.py`:
-```python
-TWILIO_ACCOUNT_SID = "tu_account_sid"
-TWILIO_AUTH_TOKEN = "tu_auth_token"
-TWILIO_PHONE_FROM = "+1234567890"  # Tu número Twilio
-TWILIO_PHONE_TO = "+50662494299"    # Número destino
+En `Esp32/carrito_control.ino`:
+```cpp
+#define DISTANCE_THRESHOLD 20  // cm - distancia mínima para detener
 ```
-
-3. **Probar configuración**:
-```bash
-python test_twilio.py
-```
-
-📚 **Guía completa**: Ver `Aplicacion/CONFIGURAR_TWILIO.md` y `SISTEMA_COLISION.md`
+-
 
 ## 📡 Arquitectura del Sistema
 
@@ -190,7 +196,13 @@ python test_twilio.py
 │  │   Comm    │  │    Comandos String     │  ┌─────▼─────┐  │
 │  │  Module   │──┼───────────────────────►│  │   PWM     │  │
 │  └───────────┘  │    FORWARD, STOP, etc  │  └─────┬─────┘  │
-└─────────────────┘                        └────────┼─────────┘
+└─────────────────┘                        │        │        │
+                                            │  ┌─────▼──────┐ │
+                                            │  │  Sensores  │ │
+                                            │  │ HC-SR04    │ │
+                                            │  │ MPU-6050   │ │
+                                            │  └────────────┘ │
+                                            └────────┼─────────┘
                                                     │
                                             ┌───────▼────────┐
                                             │  Motores DC    │
@@ -209,6 +221,9 @@ python test_twilio.py
 | PC → ESP32 | `SPEED_LOW\n` | - | Vel. baja (150) |
 | PC → ESP32 | `SPEED_HIGH\n` | - | Vel. alta (255) |
 | ESP32 → PC | `OK\n` | - | Confirmación |
+| ESP32 → PC | `COLLISION\n` | - | Colisión detectada |
+| ESP32 → PC | `DISTANCE:XX\n` | XX (cm) | Distancia frontal |
+| ESP32 → PC | `ACCEL:X,Y,Z\n` | Valores | Datos acelerómetro |
 
 ## 🐛 Solución de Problemas
 
@@ -228,6 +243,18 @@ python test_twilio.py
 4. ✅ Revisa los pines en el código
 5. ✅ Prueba con velocidad alta primero
 
+### El sensor HC-SR04 no funciona
+
+1. ✅ Verifica conexiones (TRIG, ECHO, GND, VCC)
+2. ✅ Asegúrate de que haya objetos frente al sensor
+3. ✅ Prueba en el Monitor Serie
+
+### El MPU-6050 no se detecta
+
+1. ✅ Verifica las conexiones I2C (SDA GPIO 21, SCL GPIO 22)
+2. ✅ Usa resistencias pull-up si es necesario
+3. ✅ Verifica la dirección I2C (0x68)
+
 ### La interfaz Python no abre
 
 1. ✅ Verifica que Python 3.7+ esté instalado
@@ -239,17 +266,19 @@ python test_twilio.py
 ### Software
 - [ ] Control de velocidad con slider continuo
 - [ ] Soporte para gamepad/joystick USB
-- [ ] Telemetría en tiempo real (batería, distancia)
+- [ ] Telemetría avanzada (batería, distancia, aceleración)
 - [ ] Grabación y reproducción de trayectorias
 - [ ] Streaming de cámara
-- [ ] Modo autónomo (evitar obstáculos)
+- [ ] Modo autónomo con mapeo de obstáculos
+- [ ] Dashboard web para monitoreo remoto
 
 ### Hardware
-- [ ] Sensor ultrasónico HC-SR04
 - [ ] Módulo de cámara ESP32-CAM
 - [ ] Sensor de velocidad (encoders)
-- [ ] Luces LED direccionales
-- [ ] Buzzer para señales
+- [ ] Luces LED direccionales RGB
+- [ ] Buzzer para señales audibles
+- [ ] Sensor de nivel de batería
+- [ ] Módulo GPS para localización
 
 ## 📸 Capturas de Pantalla
 
@@ -272,25 +301,17 @@ python test_twilio.py
 │  ┌─────────┐  ┌────────┐       │
 │  │🐌 BAJA  │  │🚀 ALTA │       │
 │  └─────────┘  └────────┘       │
+│                                 │
+│  Monitoreo en Tiempo Real       │
+│  Distancia: 45 cm ▓▓▓▓░░░░░░   │
+│  Aceleración: 0.2g              │
 └─────────────────────────────────┘
 ```
 
-## 👥 Contribuciones
 
-Este es un proyecto educativo. Si encuentras mejoras o bugs:
-1. Crea un issue
-2. Haz un fork
-3. Envía un pull request
 
-## 📄 Licencia
+##  Licencia
 
 Proyecto educativo para el curso de Arquitectura de Computadores.
 Libre para uso académico.
 
-## 📞 Contacto
-
-Para dudas o sugerencias sobre el proyecto, consulta con tu instructor o crea un issue en el repositorio.
-
----
-
-**¡Disfruta construyendo tu carrito controlado por ESP32!** 🚗💨
