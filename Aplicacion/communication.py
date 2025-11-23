@@ -5,14 +5,16 @@ Módulo de comunicación WiFi con el ESP32
 import socket
 import time
 import threading
+import json
 from typing import Optional, Callable
+from collections import deque
 import config
 
 
 class ESP32Communication:
     """Clase para manejar la comunicación con el ESP32"""
     
-    def __init__(self, monitor=None, collision_callback: Optional[Callable] = None, speed_callback: Optional[Callable] = None):
+    def __init__(self, monitor=None, collision_callback: Optional[Callable] = None, speed_callback: Optional[Callable] = None, log_callback: Optional[Callable] = None):
         self.ip = config.ESP32_IP
         self.port = config.ESP32_PORT
         self.socket: Optional[socket.socket] = None
@@ -22,8 +24,10 @@ class ESP32Communication:
         self.monitor = monitor  # Monitor de estadísticas
         self.collision_callback = collision_callback  # Callback para colisiones
         self.speed_callback = speed_callback  # Callback para actualizaciones de velocidad
+        self.log_callback = log_callback  # Callback para logs del ESP32
         self.listen_thread = None
         self.should_listen = False
+        self.esp32_logs = deque(maxlen=10)  # Buffer circular de 10 logs
         
     def connect(self) -> bool:
         """
@@ -125,6 +129,14 @@ class ESP32Communication:
         """Asigna un callback para actualizaciones de velocidad"""
         self.speed_callback = callback
     
+    def set_log_callback(self, callback: Callable):
+        """Asigna un callback para logs del ESP32"""
+        self.log_callback = callback
+    
+    def request_logs(self):
+        """Solicita los logs actuales del ESP32"""
+        return self.send_command("GET_LOGS")
+    
     def _listen_for_messages(self):
         """Hilo que escucha mensajes entrantes del ESP32"""
         print("🎧 Hilo de escucha iniciado")
@@ -159,6 +171,25 @@ class ESP32Communication:
                                     print("⚠️ ¡Alerta de colisión detectada!")
                                     if self.collision_callback:
                                         self.collision_callback()
+                                
+                                # Detectar logs del ESP32
+                                elif message.startswith("LOGS:"):
+                                    try:
+                                        json_str = message.split("LOGS:", 1)[1]
+                                        logs_data = json.loads(json_str)
+                                        if "logs" in logs_data:
+                                            # Actualizar buffer de logs
+                                            self.esp32_logs.clear()
+                                            for log in logs_data["logs"]:
+                                                self.esp32_logs.append(log)
+                                            
+                                            # Notificar al callback
+                                            if self.log_callback:
+                                                self.log_callback(list(self.esp32_logs))
+                                            
+                                            print(f"📋 Recibidos {len(self.esp32_logs)} logs del ESP32")
+                                    except (json.JSONDecodeError, IndexError) as e:
+                                        print(f"Error procesando logs: {e}")
                     except socket.timeout:
                         continue  # Timeout normal, seguir escuchando
                     except Exception as e:
