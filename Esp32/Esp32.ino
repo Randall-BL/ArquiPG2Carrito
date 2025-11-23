@@ -74,9 +74,9 @@ const float GRAVITY = 980.0;  // cm/s
 // -------------------------
 // SISTEMA DE DETECCIÓN DE OBSTÁCULOS
 // -------------------------
-const float DISTANCIA_INICIO_FRENADO = 120.0;  // cm - Inicia desaceleración
-const float DISTANCIA_DETENCION = 25.0;        // cm - Debe estar detenido
-const float DISTANCIA_REVERSA = 20.0;          // cm - Activa reversa
+const float DISTANCIA_INICIO_FRENADO = 90.0;  // cm - Inicia desaceleración
+const float DISTANCIA_DETENCION = 45.0;        // cm - Debe estar detenido
+const float DISTANCIA_REVERSA = 40.0;          // cm - Activa reversa
 const int VELOCIDAD_REVERSA = 255;             // PWM para reversa
 
 bool modoFrenadoAutomatico = false;  // Indica si está frenando automáticamente
@@ -162,9 +162,12 @@ void avanzar() {
 
 void retroceder() {
   // Retroceder SIEMPRE obedece el comando del usuario
-  // Cancela cualquier modo automático activo
+  // Cancela cualquier modo automático activo INMEDIATAMENTE
   modoFrenadoAutomatico = false;
   modoReversaAutomatica = false;
+  
+  // Restaurar velocidad deseada para que el sistema no la resetee
+  velocidad = velocidadDeseada;
   
   // Usando registros directos
   GPIO.out_w1tc = IN1_MASK;  // Clear IN1
@@ -280,6 +283,12 @@ void verificarSensoresSeguridad() {
   float d = medirDistancia();
   
   if (d > 0) {
+    // NO aplicar lógica de seguridad si el usuario está retrocediendo manualmente
+    if (moviendoAtras) {
+      // Usuario tiene control manual, no interferir
+      return;
+    }
+    
     if (d < DISTANCIA_REVERSA) {
       if (!modoReversaAutomatica) {
         addLog("EMERGENCIA! Reversa automatica a " + String(d, 1) + "cm");

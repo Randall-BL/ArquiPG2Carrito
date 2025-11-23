@@ -1,16 +1,16 @@
 {
-  "timestamp": "2025-11-22T22:15:00.646867",
+  "timestamp": "2025-11-23T12:52:28.626756",
   "logs": [
-    "[75s] CMD: IZQUIERDA",
-    "[76s] CMD: IZQUIERDA",
-    "[77s] Frenado gradual iniciado a 118.2cm",
-    "[77s] Zona segura. Control normal restaurado",
-    "[77s] Frenado gradual iniciado a 109.8cm",
-    "[78s] CMD: DETENER",
-    "[78s] CMD: DETENER",
-    "[79s] CMD: DETENER",
-    "[80s] CMD: DETENER",
-    "[81s] CMD: DETENER"
+    "[122s] CMD: RETROCEDER (forzado)",
+    "[124s] CMD: DERECHA",
+    "[125s] CMD: IZQUIERDA",
+    "[125s] CMD: DETENER",
+    "[126s] CMD: AVANZAR",
+    "[127s] CMD: IZQUIERDA",
+    "[128s] Frenado gradual iniciado a 81.2cm",
+    "[128s] DETENCION! Obstaculo a 42.1cm",
+    "[128s] EMERGENCIA! Reversa automatica a 37.2cm",
+    "[129s] DETENCION! Obstaculo a 42.9cm"
   ],
   "total_logs": 10
 }
