@@ -33,9 +33,8 @@ ArquiPG2Carrito/
 ├── Esp32/                   # Código para ESP32
 │   ├── Esp32.ino           # Programa principal ESP32
 │   └── README.md           # Documentación ESP32
-│
-├── SISTEMA_COLISION.md     # Documentación de colisiones
-└── README.md               # Este archivo
+│  
+└── README.md               # Este archivo pero en la raiz
 ```
 
 ## 🚀 Características Principales
@@ -204,6 +203,30 @@ En `Esp32/carrito_control.ino`:
                                             ┌───────▼────────┐
                                             │  Motores DC    │
                                             └────────────────┘
+```
+
+## 📊 Diagrama de Conexión
+
+```
+                 ESP32
+                   |
+    +--------------+---------------+
+    |              |               |
+   GPIO26        GPIO27          GPIO14
+    |              |               |
+    IN1           IN2             ENA
+    |              |               |
+    +---------- L298N ------------+
+    |              |               |
+    IN3           IN4             ENB
+    |              |               |
+   GPIO25        GPIO33          GPIO32
+    |              |               |
+    +--------------+---------------+
+                   |
+              Motor Izq & Der
+                   |
+              Batería 6-12V
 ```
 
 ## 📊 Protocolo de Comunicación
