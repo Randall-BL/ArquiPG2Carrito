@@ -215,7 +215,7 @@ En `Esp32/carrito_control.ino`:
                    |
     +--------------+---------------+
     |              |               |
-   GPIO26        GPIO27          GPIO14
+   GPIO25        GPIO26          GPIO32
     |              |               |
     IN1           IN2             ENA
     |              |               |
@@ -223,13 +223,14 @@ En `Esp32/carrito_control.ino`:
     |              |               |
     IN3           IN4             ENB
     |              |               |
-   GPIO25        GPIO33          GPIO32
+   GPIO27        GPIO14          GPIO33
     |              |               |
     +--------------+---------------+
                    |
               Motor Izq & Der
                    |
               Batería 6-12V
+
 ```
 
 ## 📊 Protocolo de Comunicación
