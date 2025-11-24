@@ -28,13 +28,16 @@ ArquiPG2Carrito/
 │   ├── config.py           # Configuración
 │   ├── requirements.txt    # Dependencias
 │   ├── test_twilio.py      # Prueba de SMS
-│   └── README.md           # Documentación Python
+│   
 │
 ├── Esp32/                   # Código para ESP32
 │   ├── Esp32.ino           # Programa principal ESP32
-│   └── README.md           # Documentación ESP32
+├── docs/                   # Código para ESP32
+│   ├── Readme.md           #La misma documentación que en al Raiz
+│   ├── Documentación_diseño.md         # Documentación del diseño del proyecto
+│   
 │  
-└── README.md               # Este archivo pero en la raiz
+└── README.md               # Documentación en Raiz
 ```
 
 ## 🚀 Características Principales
