@@ -323,7 +323,7 @@ En `Esp32/carrito_control.ino`:
 │  └─────────┘  └────────┘       │
 │                                 │
 │  Monitoreo en Tiempo Real       │
-│  Distancia: 45 cm ▓▓▓▓░░░░░░   │
+│  Distancia: 45 cm │
 │  Aceleración: 0.2g              │
 └─────────────────────────────────┘
 ```
