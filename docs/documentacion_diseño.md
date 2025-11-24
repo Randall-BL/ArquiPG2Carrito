@@ -5,13 +5,13 @@
 
 ---
 
-# 1. Diseño de Hardware
+# 1. Diseño de Hardware (5%)
 
-Esta sección detalla el diseño físico y electrónico del robot, cubriendo la selección de componentes, interconexiones, implementación del circuito y análisis energético, cumpliendo con los requerimientos de ingeniería del sistema.
+Esta sección detalla el diseño físico y electrónico del robot, cubriendo la selección de componentes, interconexiones, implementación del circuito y análisis energético.
 
 ## 1.1 Selección y justificación del microcontrolador
 
-Para este proyecto se seleccionó el **ESP32 (SoC Espressif Systems)** en su formato de placa de desarrollo NodeMCU. A continuación, se presenta una comparativa técnica frente a otras alternativas, justificando su elección.
+Para este proyecto se seleccionó el **ESP32 (SoC Espressif Systems)**. A continuación, se presenta una comparativa técnica frente a otras alternativas, justificando su elección.
 
 | Característica | Arduino Uno (ATmega328P) | **ESP32 (Seleccionado)** | Justificación para el proyecto |
 | :--- | :--- | :--- | :--- |
@@ -25,7 +25,9 @@ Para este proyecto se seleccionó el **ESP32 (SoC Espressif Systems)** en su for
 
 ## 1.2 Diagramas de conexión
 
-El sistema sigue el siguiente mapeo de conexiones (Netlist) entre el microcontrolador y los periféricos, validado en la configuración del firmware:
+El sistema sigue el siguiente mapeo de conexiones (Netlist) entre el microcontrolador y los periféricos.
+
+**Tabla de conexiones (Pinout):**
 
 | Componente | Pin del Componente | Pin ESP32 (GPIO) | Descripción |
 | :--- | :--- | :--- | :--- |
@@ -39,6 +41,11 @@ El sistema sigue el siguiente mapeo de conexiones (Netlist) entre el microcontro
 | | SCL | **GPIO 21** | Reloj I²C |
 | **HC-SR04** | TRIG | **GPIO 4** | Disparo de pulso |
 | | ECHO | **GPIO 5** | Lectura de eco (Interrupción) |
+
+**Diagrama esquemático de conexiones:**
+
+![Diagrama de conexiones del sistema](imgs/diagrama_conexiones.png)
+*Figura 1: Diagrama de bloques mostrando las interconexiones entre el ESP32, drivers de potencia y sensores.*
 
 ## 1.3 Especificaciones de sensores y actuadores
 
