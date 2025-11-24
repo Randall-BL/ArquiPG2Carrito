@@ -393,6 +393,39 @@ En el entorno **ESP32 con Arduino**, la memoria de programa y de datos se organi
 
 El diseño evita el uso explícito de memoria dinámica por parte del usuario (no hay `new` / `malloc` en el código), lo cual simplifica el análisis de consumo de memoria y reduce el riesgo de fragmentación.
 
+### 2.6 Bibliotecas y dependencias del firmware embebido
+
+Para el desarrollo del firmware en el ESP32 se utilizaron las siguientes bibliotecas:
+
+- **Core Arduino para ESP32**
+  - Proporciona el entorno de ejecución base (`setup()`, `loop()`), tipos básicos y funciones de E/S digital, PWM, temporizadores, etc.
+  - Incluye el soporte de WiFi y TCP/IP necesario para implementar el servidor de control.
+
+- **`<WiFi.h>`**
+  - Manejo de la interfaz WiFi del ESP32.
+  - Configuración del modo Access Point (`WiFi.softAP(ssid, password)`).
+  - Obtención de la IP del AP (`WiFi.softAPIP()`).
+
+- **`<WiFiAP.h>` y `<WiFiClient.h>`**
+  - Soporte específico para el rol de **punto de acceso** y para la gestión de clientes TCP.
+  - Permiten crear el servidor con `WiFiServer server(80)` y aceptar conexiones con `WiFiClient client = server.available()`.
+
+- **`<Wire.h>`**
+  - Implementa el bus **I²C** utilizado para comunicarse con el sensor inercial MPU6050.
+  - Uso en el código: `Wire.begin(22, 21)` y como backend de la librería del sensor.
+
+- **`"MPU6050.h"`**
+  - Biblioteca específica del sensor **MPU6050** (acelerómetro + giroscopio).
+  - Facilita la lectura de aceleraciones y giros mediante funciones de alto nivel como `mpu.getAcceleration(&ax, &ay, &az)`.
+
+- **`"driver/gpio.h"`, `"soc/gpio_reg.h"`, `"soc/gpio_struct.h"`**
+  - Cabeceras de bajo nivel del SDK del ESP32 (ESP-IDF).
+  - Se utilizan para acceder directamente a los registros de GPIO (por ejemplo, `GPIO.out_w1tc`, `GPIO.out_w1ts`) y así optimizar el tiempo de conmutación de las señales que controlan el puente H (L298N).
+  - Esta optimización reduce la latencia de control de los motores frente al uso exclusivo de `digitalWrite()`.
+
+Estas bibliotecas permiten combinar **alto nivel** (Arduino + WiFi + I²C) con **control de bajo nivel** sobre los pines del ESP32, cumpliendo los requisitos de tiempo real y comunicación del proyecto.
+
+
 ---
 
 ## 3. Aplicación de usuario y comunicación
@@ -655,3 +688,58 @@ Además, si la lógica de firmware genera mensajes de colisión que son detectad
 3. **Intenta enviar un SMS** a un número preconfigurado mediante `TwilioNotifier`, siempre respetando el tiempo de *cooldown* configurado para evitar múltiples mensajes en muy poco tiempo.
 
 De este modo, la aplicación de usuario no solo proporciona **control interactivo**, sino también un nivel adicional de **supervisión y seguridad remota**, cerrando el ciclo de comunicación robot–usuario requerido por el proyecto.
+
+### 3.6 Bibliotecas y dependencias de la aplicación de usuario
+
+La aplicación de control remoto se desarrolló en **Python 3** utilizando principalmente módulos de la biblioteca estándar y una dependencia externa para las notificaciones por SMS.
+
+**Requisitos generales:**
+
+- **Python 3.7 o superior**
+  - Entorno de ejecución principal de la aplicación.
+- **Tkinter**
+  - Incluido en la instalación estándar de Python en la mayoría de sistemas (Windows/Linux).
+  - Utilizado para construir la interfaz gráfica (`ControlGUI`).
+
+**Módulos de la biblioteca estándar de Python:**
+
+- `socket`  
+  - Creación del socket TCP cliente para conectarse al servidor del ESP32.
+  - Envío y recepción de comandos y respuestas (`sendall`, `recv`).
+
+- `threading`  
+  - Gestión del hilo de escucha en segundo plano que recibe mensajes del ESP32 sin bloquear la GUI.
+
+- `time`  
+  - Medición de tiempos para estadísticas de latencia, cooldown de notificaciones, etc.
+
+- `json`  
+  - Serialización y deserialización de estructuras JSON (por ejemplo, logs enviados por el ESP32 y archivo `esp32_logs.json`).
+
+- `collections.deque`  
+  - Buffers circulares para:
+    - Historial de latencias.
+    - Log de comunicación.
+    - Últimos logs recibidos del ESP32.
+
+- `os`  
+  - Lectura de variables de entorno para las credenciales de Twilio.
+
+- `datetime`  
+  - Timestamps legibles para el archivo de logs local.
+
+- `typing` (`Optional`, `Callable`, `List`, `Dict`)  
+  - Anotaciones de tipos para mejorar la legibilidad y el mantenimiento del código.
+
+- `tkinter` y `tkinter.messagebox`  
+  - Creación de ventanas, botones, etiquetas y diálogos de información/error en la interfaz de usuario.
+
+**Dependencia externa:**
+
+- `twilio`
+  - Biblioteca oficial de Twilio (`from twilio.rest import Client`).
+  - Utilizada en `TwilioNotifier` para enviar SMS de alerta de colisión al teléfono configurado.
+  - Se instala mediante:
+
+  ```bash
+  pip install twilio
